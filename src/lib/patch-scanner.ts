@@ -28,6 +28,21 @@ import { getAllEscalations, resolveEscalation } from './escalation-store';
 const execAsync = promisify(exec);
 
 /**
+ * Returns true if version a >= b (major.minor.patch).
+ * Non-numeric/missing parts treated as 0. Strips leading ^~.
+ */
+function semverGte(a: string, b: string): boolean {
+  const pa = a.replace(/^[\^~]/, '').split('.').map(s => parseInt(s, 10) || 0);
+  const pb = b.replace(/^[\^~]/, '').split('.').map(s => parseInt(s, 10) || 0);
+  for (let i = 0; i < 3; i++) {
+    const av = pa[i] ?? 0, bv = pb[i] ?? 0;
+    if (av > bv) return true;
+    if (av < bv) return false;
+  }
+  return true; // equal
+}
+
+/**
  * Detect package manager for a project.
  *
  * Detection priority:
@@ -453,7 +468,15 @@ export async function scanVulnerabilities(
       }
     }
 
-    return result;
+    // Drop entries where the fix version is older than the currently installed version.
+    // This happens when npm audit references an advisory whose patched_versions only
+    // covers an older major (e.g. next <9.3.3 advisory while installed is 16.2.4).
+    // The package is already beyond the vulnerable range — no action needed.
+    return result.filter(vuln => {
+      if (!vuln.fixVersion || !vuln.currentVersion) return true;
+      if (vuln.fixVersion === 'latest' || vuln.fixVersion === 'resolve-latest') return true;
+      return !semverGte(vuln.currentVersion, vuln.fixVersion);
+    });
   } catch (error) {
     console.error(`Failed to scan vulnerabilities for ${project.id}:`, error);
     return [];
@@ -677,6 +700,17 @@ export function buildPriorityQueue(
       const targetVersion = latestVersion && latestVersion !== fixVersion
         ? latestVersion
         : fixVersion;
+      // Safety net: skip if targetVersion would be a downgrade.
+      // Shouldn't happen after scanVulnerabilities filtering, but guards
+      // against stale cache entries written before the filter existed.
+      if (
+        targetVersion &&
+        firstVuln.currentVersion &&
+        targetVersion !== 'latest' &&
+        targetVersion !== 'resolve-latest' &&
+        semverGte(firstVuln.currentVersion, targetVersion)
+      ) continue;
+
       const updateType = firstVuln.currentVersion
         ? getUpdateType(firstVuln.currentVersion, targetVersion)
         : 'patch';
