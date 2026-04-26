@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -102,6 +103,7 @@ export function BranchPropagateModal({
       <DialogContent className="max-w-lg bg-zinc-900 border-zinc-700">
         <DialogHeader>
           <DialogTitle className="text-zinc-100">Propagate Branch Dependencies</DialogTitle>
+          <DialogDescription className="sr-only">Propagate dependency updates from this branch across selected projects.</DialogDescription>
         </DialogHeader>
 
         {loading && (

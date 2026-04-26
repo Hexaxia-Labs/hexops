@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -232,6 +233,9 @@ export function AddProjectDialog({
           <DialogTitle className="text-zinc-100">
             {isEdit ? 'Edit Project' : 'Add Project'}
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            {isEdit ? 'Edit the configuration for this project.' : 'Add a new project to the hexops dashboard.'}
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
