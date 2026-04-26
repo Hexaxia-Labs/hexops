@@ -318,13 +318,16 @@ export async function POST(
           } else if (packageManager === 'npm') {
             if (!pkgJson.overrides) pkgJson.overrides = {};
             for (const pkg of overridePkgs) {
-              // npm throws EOVERRIDE if the package is also a direct dep.
-              // In that case update the dep version directly instead of using an override.
               if (pkgJson.dependencies?.[pkg.name] !== undefined) {
+                // Direct dep in dependencies: update it directly (npm EOVERRIDE prevents overriding owned deps).
                 pkgJson.dependencies[pkg.name] = pkg.targetVersion;
-              } else if (pkgJson.devDependencies?.[pkg.name] !== undefined) {
-                pkgJson.devDependencies[pkg.name] = pkg.targetVersion;
               } else {
+                // For fixViaOverride we MUST write a flat override — updating a devDep version
+                // only affects the top-level install, not nested copies (e.g. next pins postcss 8.4.31).
+                // Remove from devDependencies first to avoid EOVERRIDE, then write the flat override.
+                if (pkgJson.devDependencies?.[pkg.name] !== undefined) {
+                  delete pkgJson.devDependencies[pkg.name];
+                }
                 pkgJson.overrides[pkg.name] = pkg.targetVersion;
               }
             }
@@ -354,10 +357,25 @@ export async function POST(
           } catch (installErr) {
             const err = installErr as { stdout?: string; stderr?: string; message?: string };
             installOutput = `$ ${installCmd}\n${err.stdout || ''}${err.stderr || ''}`;
-            // Check if it looks like it worked despite exit code
-            const looksInstalled = (err.stdout || '').includes('added') || (err.stdout || '').includes('done');
+            // npm may exit non-zero due to an unrelated postinstall script (ELIFECYCLE) while still
+            // having installed all packages correctly. Accept if the output mentions package counts.
+            const combinedOut = `${err.stdout || ''} ${err.stderr || ''}`;
+            const looksInstalled =
+              combinedOut.includes('added') ||
+              combinedOut.includes('done') ||
+              combinedOut.includes('up to date') ||
+              /\d+ packages/.test(combinedOut);
             if (!looksInstalled) {
-              throw new Error(err.stderr || err.message || 'Install after override failed');
+              // Last resort: verify by checking installed versions in node_modules
+              const anyResolved = overridePkgs.some(pkg => {
+                try {
+                  const p = join(cwd, 'node_modules', pkg.name, 'package.json');
+                  return existsSync(p) && JSON.parse(readFileSync(p, 'utf-8')).version === pkg.targetVersion;
+                } catch { return false; }
+              });
+              if (!anyResolved) {
+                throw new Error(err.stderr || err.message || 'Install after override failed');
+              }
             }
           }
 
