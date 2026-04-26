@@ -17,9 +17,11 @@ export async function GET(_request: NextRequest) {
     const projectMap: Record<string, string> = {};
     const projectCategories: Record<string, string> = {};
     const holdsMap: Record<string, string[]> = {};
+    const pathMap: Record<string, string> = {};
     for (const project of projects) {
       projectMap[project.id] = project.name;
       projectCategories[project.id] = project.category;
+      pathMap[project.id] = project.path;
       if (project.holds && project.holds.length > 0) {
         holdsMap[project.id] = project.holds;
       }
@@ -42,7 +44,7 @@ export async function GET(_request: NextRequest) {
     const validCaches = caches.filter((c): c is ProjectPatchCache => c !== null);
 
     // Build priority queue with project names and holds
-    const { queue, summary } = buildPriorityQueue(validCaches, projectMap, holdsMap);
+    const { queue, summary } = buildPriorityQueue(validCaches, projectMap, holdsMap, pathMap);
 
     return NextResponse.json({
       queue,

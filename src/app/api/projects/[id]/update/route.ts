@@ -205,12 +205,23 @@ export async function POST(
         }
         // Refuse downgrades — targetVersion older than fromVersion means the package
         // is already past the fix (stale cache / old advisory data).
-        if (pkg.fromVersion && !/^(latest|next|canary)$/.test(targetVersion)) {
-          const fv = pkg.fromVersion.replace(/^[\^~]/, '').split('.').map(n => parseInt(n, 10) || 0);
+        // When fromVersion is missing (npm audit omits it for range-constrained packages),
+        // fall back to the installed version in node_modules as the authoritative baseline.
+        let effectiveFromVersion = pkg.fromVersion || '';
+        if (!effectiveFromVersion && !/^(latest|next|canary)$/.test(targetVersion)) {
+          try {
+            const nmPath = join(cwd, 'node_modules', pkg.name, 'package.json');
+            if (existsSync(nmPath)) {
+              effectiveFromVersion = JSON.parse(readFileSync(nmPath, 'utf-8')).version || '';
+            }
+          } catch { /* ignore — fall through to skip the guard */ }
+        }
+        if (effectiveFromVersion && !/^(latest|next|canary)$/.test(targetVersion)) {
+          const fv = effectiveFromVersion.replace(/^[\^~]/, '').split('.').map(n => parseInt(n, 10) || 0);
           const tv = targetVersion.replace(/^[\^~]/, '').split('.').map(n => parseInt(n, 10) || 0);
           const isDowngrade = fv[0] > tv[0] || (fv[0] === tv[0] && fv[1] > tv[1]) || (fv[0] === tv[0] && fv[1] === tv[1] && (fv[2] ?? 0) > (tv[2] ?? 0));
           if (isDowngrade) {
-            results.push({ package: pkg.name, success: false, output: '', error: `Refused: ${targetVersion} is older than installed ${pkg.fromVersion} — package is already past this fix` });
+            results.push({ package: pkg.name, success: false, output: '', error: `Refused: ${targetVersion} is older than installed ${effectiveFromVersion} — package is already past this fix` });
             continue;
           }
         }

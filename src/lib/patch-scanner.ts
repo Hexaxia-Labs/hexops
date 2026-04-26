@@ -687,7 +687,8 @@ function annotateWithEscalations(items: PatchQueueItem[]): PatchQueueItem[] {
 export function buildPriorityQueue(
   caches: ProjectPatchCache[],
   projectMap: Record<string, string> = {},  // id -> name mapping
-  holdsMap: Record<string, string[]> = {}   // id -> held package names
+  holdsMap: Record<string, string[]> = {},  // id -> held package names
+  pathMap: Record<string, string> = {}      // id -> filesystem path
 ): { queue: PatchQueueItem[]; summary: PatchSummary } {
   const queue: PatchQueueItem[] = [];
   const summary: PatchSummary = {
@@ -760,15 +761,33 @@ export function buildPriorityQueue(
       const targetVersion = latestVersion && latestVersion !== fixVersion
         ? latestVersion
         : fixVersion;
+
+      // Resolve the installed version — npm audit may leave currentVersion empty
+      // for packages where the range constraint is below the installed version
+      // (e.g. package.json: ^9.3.3 but node_modules has 16.2.4). Fall back to
+      // reading node_modules directly so the downgrade guard always has a value.
+      let resolvedCurrentVersion = firstVuln.currentVersion || '';
+      if (!resolvedCurrentVersion) {
+        const projectPath = pathMap[cache.projectId];
+        if (projectPath) {
+          try {
+            const nmPkgPath = join(projectPath, 'node_modules', packageName, 'package.json');
+            if (existsSync(nmPkgPath)) {
+              resolvedCurrentVersion = JSON.parse(readFileSync(nmPkgPath, 'utf-8')).version || '';
+            }
+          } catch { /* ignore — guard will use empty string as before */ }
+        }
+      }
+
       // Safety net: skip if targetVersion would be a downgrade.
       // Shouldn't happen after scanVulnerabilities filtering, but guards
       // against stale cache entries written before the filter existed.
       if (
         targetVersion &&
-        firstVuln.currentVersion &&
+        resolvedCurrentVersion &&
         targetVersion !== 'latest' &&
         targetVersion !== 'resolve-latest' &&
-        semverGte(firstVuln.currentVersion, targetVersion)
+        semverGte(resolvedCurrentVersion, targetVersion)
       ) continue;
 
       const updateType = firstVuln.currentVersion
