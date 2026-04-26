@@ -311,10 +311,19 @@ export interface VulnerabilityInfo {
   dependabotManaged?: boolean;
 }
 
+export interface ActiveOverride {
+  package: string;
+  version: string;
+  packageManager: 'npm' | 'pnpm' | 'yarn';
+  overrideKey: 'overrides' | 'pnpm.overrides' | 'resolutions';
+  stale: boolean;  // true = no current vulnerability for this package (override may no longer be needed)
+}
+
 export interface ProjectPatchCache {
   projectId: string;
   timestamp: string;
   expiresAt: string;
   outdated: OutdatedPackage[];
   vulnerabilities: VulnerabilityInfo[];
+  activeOverrides?: ActiveOverride[];
 }

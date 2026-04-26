@@ -6,6 +6,7 @@ import type {
   PatchHistoryEntry,
   ProjectPatchCache,
   ProjectPatchState,
+  ActiveOverride,
 } from './types';
 
 // Storage paths
@@ -206,7 +207,8 @@ export function writeProjectCache(cache: ProjectPatchCache): void {
 export function createProjectCache(
   projectId: string,
   outdated: ProjectPatchCache['outdated'],
-  vulnerabilities: ProjectPatchCache['vulnerabilities']
+  vulnerabilities: ProjectPatchCache['vulnerabilities'],
+  activeOverrides?: ActiveOverride[]
 ): ProjectPatchCache {
   const now = new Date();
   return {
@@ -215,6 +217,7 @@ export function createProjectCache(
     expiresAt: new Date(now.getTime() + getCacheTTL()).toISOString(),
     outdated,
     vulnerabilities,
+    ...(activeOverrides && activeOverrides.length > 0 ? { activeOverrides } : {}),
   };
 }
 
