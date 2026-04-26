@@ -203,6 +203,17 @@ export async function POST(
           results.push({ package: pkg.name, success: false, output: '', error: 'Invalid version specifier' });
           continue;
         }
+        // Refuse downgrades — targetVersion older than fromVersion means the package
+        // is already past the fix (stale cache / old advisory data).
+        if (pkg.fromVersion && !/^(latest|next|canary)$/.test(targetVersion)) {
+          const fv = pkg.fromVersion.replace(/^[\^~]/, '').split('.').map(n => parseInt(n, 10) || 0);
+          const tv = targetVersion.replace(/^[\^~]/, '').split('.').map(n => parseInt(n, 10) || 0);
+          const isDowngrade = fv[0] > tv[0] || (fv[0] === tv[0] && fv[1] > tv[1]) || (fv[0] === tv[0] && fv[1] === tv[1] && (fv[2] ?? 0) > (tv[2] ?? 0));
+          if (isDowngrade) {
+            results.push({ package: pkg.name, success: false, output: '', error: `Refused: ${targetVersion} is older than installed ${pkg.fromVersion} — package is already past this fix` });
+            continue;
+          }
+        }
         validPackages.push({ name: pkg.name, fromVersion: pkg.fromVersion, targetVersion, fixViaOverride: pkg.fixViaOverride, fixByParent: pkg.fixByParent });
       }
 
@@ -307,7 +318,15 @@ export async function POST(
           } else if (packageManager === 'npm') {
             if (!pkgJson.overrides) pkgJson.overrides = {};
             for (const pkg of overridePkgs) {
-              pkgJson.overrides[pkg.name] = pkg.targetVersion;
+              // npm throws EOVERRIDE if the package is also a direct dep.
+              // In that case update the dep version directly instead of using an override.
+              if (pkgJson.dependencies?.[pkg.name] !== undefined) {
+                pkgJson.dependencies[pkg.name] = pkg.targetVersion;
+              } else if (pkgJson.devDependencies?.[pkg.name] !== undefined) {
+                pkgJson.devDependencies[pkg.name] = pkg.targetVersion;
+              } else {
+                pkgJson.overrides[pkg.name] = pkg.targetVersion;
+              }
             }
           } else {
             // yarn uses "resolutions"
@@ -343,10 +362,27 @@ export async function POST(
           }
 
           for (const pkg of overridePkgs) {
+            // Verify the override actually resolved — exact-pinned transitive deps
+            // (e.g. next pins postcss 8.4.31) can silently survive an override install.
+            let verifyWarning = '';
+            try {
+              const installedPkgPath = join(cwd, 'node_modules', pkg.name, 'package.json');
+              if (existsSync(installedPkgPath)) {
+                const installedVersion = JSON.parse(readFileSync(installedPkgPath, 'utf-8')).version;
+                if (installedVersion !== pkg.targetVersion) {
+                  verifyWarning = ` ⚠ override written but ${pkg.name} resolved to ${installedVersion} — may need lockfile reset`;
+                  logger.warn('patches', 'override_version_mismatch', `Override for ${pkg.name}: expected ${pkg.targetVersion}, got ${installedVersion}`, {
+                    projectId: id,
+                    meta: { package: pkg.name, expected: pkg.targetVersion, actual: installedVersion },
+                  });
+                }
+              }
+            } catch { /* nested scoped packages may not resolve here — non-fatal */ }
+
             results.push({
               package: pkg.name,
               success: true,
-              output: `Applied override: ${pkg.name}@${pkg.targetVersion}\n${installOutput}`,
+              output: `Applied override: ${pkg.name}@${pkg.targetVersion}${verifyWarning}\n${installOutput}`,
             });
             logger.info('patches', 'override_applied', `Applied override for ${pkg.name}@${pkg.targetVersion}`, {
               projectId: id,
@@ -362,7 +398,7 @@ export async function POST(
               updateType: pkg.fromVersion ? getUpdateType(pkg.fromVersion, pkg.targetVersion) : 'patch',
               trigger: 'manual',
               success: true,
-              output: `Override applied: ${pkg.name}@${pkg.targetVersion}`,
+              output: `Override applied: ${pkg.name}@${pkg.targetVersion}${verifyWarning}`,
             });
           }
         } catch (err) {
