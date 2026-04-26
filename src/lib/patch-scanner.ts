@@ -608,16 +608,19 @@ export async function scanProject(
   });
 
   // Reconcile patch history: check recent "success" entries against actual
-  // installed versions to catch false positives from prior soft failures
+  // installed versions AND the live advisory list to catch false positives.
+  // stillVulnerablePackages catches nested-copy overrides that didn't actually fix anything.
   const installedVersions: Record<string, string> = {};
+  const stillVulnerablePackages = new Set<string>();
   for (const vuln of vulnerabilities) {
     if (vuln.currentVersion) installedVersions[vuln.name] = vuln.currentVersion;
+    stillVulnerablePackages.add(vuln.name);
   }
   for (const pkg of outdated) {
     if (pkg.current) installedVersions[pkg.name] = pkg.current;
   }
-  if (Object.keys(installedVersions).length > 0) {
-    const corrected = reconcilePatchHistory(project.id, installedVersions);
+  if (Object.keys(installedVersions).length > 0 || stillVulnerablePackages.size > 0) {
+    const corrected = reconcilePatchHistory(project.id, installedVersions, stillVulnerablePackages);
     if (corrected > 0) {
       console.log(`Reconciled ${corrected} false-success patch history entries for ${project.id}`);
     }

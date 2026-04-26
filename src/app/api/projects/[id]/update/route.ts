@@ -93,6 +93,42 @@ async function repairPnpmLockfile(cwd: string): Promise<boolean> {
   }
 }
 
+/**
+ * Re-run npm/pnpm audit after patching and return which of the patched packages
+ * still appear as vulnerable. A non-empty list means the patch was a false positive
+ * (e.g. nested copy survived the override).
+ *
+ * Returns an empty array on audit execution failure (non-fatal — don't block patch delivery).
+ */
+async function verifyAuditClear(
+  cwd: string,
+  packageManager: string,
+  patchedPackageNames: string[],
+): Promise<string[]> {
+  if (patchedPackageNames.length === 0) return [];
+  try {
+    const auditCmd =
+      packageManager === 'pnpm'
+        ? 'pnpm audit --json 2>/dev/null || true'
+        : packageManager === 'yarn'
+        ? 'yarn audit --json 2>/dev/null || true'
+        : 'npm audit --json 2>/dev/null || true';
+
+    const { stdout } = await execAsync(auditCmd, { cwd, timeout: 60000 });
+
+    // Find the last line that looks like a JSON object — npm audit sometimes
+    // prepends warning lines before the JSON payload.
+    const jsonStart = stdout.lastIndexOf('{');
+    if (jsonStart === -1) return [];
+    const auditData = JSON.parse(stdout.slice(jsonStart));
+
+    const vulnerabilities: Record<string, unknown> = auditData?.vulnerabilities ?? {};
+    return patchedPackageNames.filter(name => name in vulnerabilities);
+  } catch {
+    return []; // Can't run audit — non-fatal, assume clear
+  }
+}
+
 interface UpdateRequestBody {
   packages?: Array<{
     name: string;
@@ -368,25 +404,17 @@ export async function POST(
           } catch (installErr) {
             const err = installErr as { stdout?: string; stderr?: string; message?: string };
             installOutput = `$ ${installCmd}\n${err.stdout || ''}${err.stderr || ''}`;
-            // npm may exit non-zero due to an unrelated postinstall script (ELIFECYCLE) while still
-            // having installed all packages correctly. Accept if the output mentions package counts.
-            const combinedOut = `${err.stdout || ''} ${err.stderr || ''}`;
-            const looksInstalled =
-              combinedOut.includes('added') ||
-              combinedOut.includes('done') ||
-              combinedOut.includes('up to date') ||
-              /\d+ packages/.test(combinedOut);
-            if (!looksInstalled) {
-              // Last resort: verify by checking installed versions in node_modules
-              const anyResolved = overridePkgs.some(pkg => {
-                try {
-                  const p = join(cwd, 'node_modules', pkg.name, 'package.json');
-                  return existsSync(p) && JSON.parse(readFileSync(p, 'utf-8')).version === pkg.targetVersion;
-                } catch { return false; }
-              });
-              if (!anyResolved) {
-                throw new Error(err.stderr || err.message || 'Install after override failed');
-              }
+            // npm/pnpm may exit non-zero due to unrelated postinstall scripts (ELIFECYCLE).
+            // Verify by checking actual installed versions in node_modules — string heuristics
+            // like "up to date" can pass even when nothing changed.
+            const anyResolved = overridePkgs.some(pkg => {
+              try {
+                const p = join(cwd, 'node_modules', pkg.name, 'package.json');
+                return existsSync(p) && JSON.parse(readFileSync(p, 'utf-8')).version === pkg.targetVersion;
+              } catch { return false; }
+            });
+            if (!anyResolved) {
+              throw new Error(err.stderr || err.message || 'Install after override failed');
             }
           }
 
@@ -516,8 +544,8 @@ export async function POST(
         // Even when pnpm exits 0, check for known error patterns in output
         // (pnpm can exit 0 with ERR_PNPM_LOCKFILE_MISSING_DEPENDENCY, leaving
         // the package specifier updated in package.json but not actually installed)
-        if (batchSuccess && batchStdout.includes('ERR_PNPM_')) {
-          const pnpmError = batchStdout.match(/ERR_PNPM_\w+/)?.[0] || 'ERR_PNPM_UNKNOWN';
+        if (batchSuccess && (batchStdout.includes('ERR_PNPM_') || batchStderr.includes('ERR_PNPM_'))) {
+          const pnpmError = (batchStdout + batchStderr).match(/ERR_PNPM_\w+/)?.[0] || 'ERR_PNPM_UNKNOWN';
           logger.warn('patches', 'pnpm_soft_failure', `pnpm exited 0 but output contains error: ${pnpmError}`, {
             projectId: id,
             meta: { packages: pkgSpecs.join(', ') },
@@ -649,13 +677,17 @@ export async function POST(
               const output = `$ ${installCmd}\n${stdout}${stderr}`;
               const error = stderr || execErr.message || 'Update failed';
 
-              // Check if it actually installed despite error
-              const looksInstalled =
-                stdout.includes('done') || stdout.includes('added') ||
-                stdout.includes('changed') || stdout.includes('reused') ||
-                stdout.includes('Already up to date');
-
-              const success = looksInstalled;
+              // Verify by reading the installed version from node_modules — string heuristics
+              // can report success when nothing actually changed (e.g. "already up to date").
+              let success = false;
+              try {
+                const nmPath = join(cwd, 'node_modules', pkg.name, 'package.json');
+                if (existsSync(nmPath)) {
+                  const installed = JSON.parse(readFileSync(nmPath, 'utf-8')).version;
+                  const isFloating = /^(latest|next|canary)$/.test(pkg.targetVersion);
+                  success = isFloating ? installed !== pkg.fromVersion : installed === pkg.targetVersion;
+                }
+              } catch { /* can't verify — stay false */ }
 
               results.push({ package: pkg.name, success, output, error: success ? undefined : error });
 
@@ -739,6 +771,82 @@ export async function POST(
       } catch {
         // Non-fatal: lockfile may already be in sync
       }
+
+      // Stale override cleanup: remove override entries where the installed version in
+      // node_modules already satisfies the pinned constraint. This prevents EOVERRIDE
+      // accumulation when Dependabot or a parent update naturally resolves the vulnerability.
+      try {
+        const pkgJsonPath = join(cwd, 'package.json');
+        const pkgJsonRaw = readFileSync(pkgJsonPath, 'utf-8');
+        const pkgJson = JSON.parse(pkgJsonRaw);
+
+        const overridesObj: Record<string, string> | undefined =
+          packageManager === 'pnpm' ? pkgJson?.pnpm?.overrides :
+          packageManager === 'npm' ? pkgJson?.overrides :
+          pkgJson?.resolutions;
+
+        if (overridesObj && Object.keys(overridesObj).length > 0) {
+          const staleKeys: string[] = [];
+          for (const [overridePkg, pinnedVersion] of Object.entries(overridesObj)) {
+            try {
+              const nmPath = join(cwd, 'node_modules', overridePkg, 'package.json');
+              if (existsSync(nmPath)) {
+                const installed = JSON.parse(readFileSync(nmPath, 'utf-8')).version;
+                // Consider stale if installed version is strictly newer than the pin
+                // (i.e., the ecosystem has moved past this fix naturally)
+                if (installed && pinnedVersion && !/^[<>=^~]/.test(pinnedVersion)) {
+                  const iv = installed.split('.').map((n: string) => parseInt(n, 10) || 0);
+                  const pv = pinnedVersion.split('.').map((n: string) => parseInt(n, 10) || 0);
+                  const isNewer = iv[0] > pv[0] || (iv[0] === pv[0] && iv[1] > pv[1]) || (iv[0] === pv[0] && iv[1] === pv[1] && (iv[2] ?? 0) > (pv[2] ?? 0));
+                  if (isNewer) staleKeys.push(overridePkg);
+                }
+              }
+            } catch { /* skip this entry */ }
+          }
+
+          if (staleKeys.length > 0) {
+            for (const key of staleKeys) {
+              delete overridesObj[key];
+            }
+            const indent = pkgJsonRaw.match(/^(\s+)/m)?.[1] || '  ';
+            writeFileSync(pkgJsonPath, JSON.stringify(pkgJson, null, indent) + '\n', 'utf-8');
+            logger.info('patches', 'stale_overrides_removed', `Removed ${staleKeys.length} stale override(s): ${staleKeys.join(', ')}`, {
+              projectId: id,
+              meta: { removed: staleKeys },
+            });
+          }
+        }
+      } catch {
+        // Non-fatal: stale cleanup is best-effort
+      }
+    }
+
+    // Post-patch audit verification: re-run audit and confirm advisory is gone.
+    // This catches false positives where a nested copy survived (e.g. next pinning
+    // postcss@8.4.31 internally even after an override was applied).
+    if (anySucceeded && packages.length > 0) {
+      const successfullyPatched = results
+        .filter(r => r.success)
+        .map(r => r.package)
+        .filter(name => name !== '*');
+
+      const stillVulnerable = await verifyAuditClear(cwd, packageManager, successfullyPatched);
+
+      if (stillVulnerable.length > 0) {
+        for (const name of stillVulnerable) {
+          const idx = results.findIndex(r => r.package === name);
+          if (idx !== -1) {
+            results[idx].success = false;
+            results[idx].error =
+              `Advisory still present after patch — nested copy may survive the override. ` +
+              `Try a lockfile reset (delete lockfile + reinstall) or escalate to force-override.`;
+          }
+          logger.warn('patches', 'audit_still_vulnerable', `${name} still in audit output after patch`, {
+            projectId: id,
+            meta: { package: name },
+          });
+        }
+      }
     }
 
     // Invalidate caches and force a fresh rescan so the dashboard immediately
@@ -747,13 +855,26 @@ export async function POST(
     invalidatePackageStatusCache(cwd);
     clearInMemoryCache(id);
 
+    // Post-patch rescan: run a fresh scan and return a brief audit summary so the
+    // caller can immediately see whether this project is now clean or still has issues.
+    let auditSummary: { vulnCount: number; criticalCount: number; remainingAdvisories: string[] } | undefined;
     if (anySucceeded) {
       try {
         const { scanProject } = await import('@/lib/patch-scanner');
         const { getProject: getProjectConfig } = await import('@/lib/config');
         const projectConfig = getProjectConfig(id);
         if (projectConfig) {
-          await scanProject(projectConfig, true); // forceRefresh=true
+          const freshCache = await scanProject(projectConfig, true);
+          if (freshCache) {
+            const remaining = (freshCache.vulnerabilities ?? []).map((v: { name: string }) => v.name);
+            auditSummary = {
+              vulnCount: freshCache.vulnerabilities?.length ?? 0,
+              criticalCount: (freshCache.vulnerabilities ?? []).filter(
+                (v: { severity: string }) => v.severity === 'critical' || v.severity === 'high'
+              ).length,
+              remainingAdvisories: [...new Set(remaining)],
+            };
+          }
         }
       } catch {
         // Non-fatal: cache will be rebuilt on next GET
@@ -768,6 +889,7 @@ export async function POST(
       packageManager,
       results,
       output: output || 'Packages updated successfully.',
+      ...(auditSummary !== undefined && { auditSummary }),
     });
   } catch (error) {
     console.error('Error updating packages:', error);

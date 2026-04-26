@@ -4,12 +4,29 @@ import { addEscalation, removeEscalation, getEscalationConfig } from '@/lib/esca
 import { resolveLockfile } from '@/lib/lockfile-resolver'
 import { detectPackageManager } from '@/lib/patch-scanner'
 import type { EscalateAction, EscalateRecord, PackageManager } from '@/lib/types'
-import { readFileSync, writeFileSync } from 'fs'
+import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { join } from 'path'
-import { execFile } from 'child_process'
+import { execFile, exec } from 'child_process'
 import { promisify } from 'util'
 
 const execFileAsync = promisify(execFile)
+const execAsync = promisify(exec)
+
+async function verifyOverrideAuditClear(cwd: string, pm: string, pkgName: string): Promise<boolean> {
+  try {
+    const auditCmd =
+      pm === 'pnpm' ? 'pnpm audit --json 2>/dev/null || true' :
+      pm === 'yarn' ? 'yarn audit --json 2>/dev/null || true' :
+      'npm audit --json 2>/dev/null || true'
+    const { stdout } = await execAsync(auditCmd, { cwd, timeout: 60000 })
+    const jsonStart = stdout.lastIndexOf('{')
+    if (jsonStart === -1) return true
+    const data = JSON.parse(stdout.slice(jsonStart))
+    return !(pkgName in (data?.vulnerabilities ?? {}))
+  } catch {
+    return true // Can't run audit — non-fatal, assume clear
+  }
+}
 
 const LOCK_FILES: Record<PackageManager, string> = {
   pnpm: 'pnpm-lock.yaml',
@@ -89,6 +106,30 @@ export async function POST(
 
       record.overrideVersion = overrideVersion
 
+      // Downgrade guard: refuse if overrideVersion is older than the currently installed version.
+      // Mirrors the same guard in the update route — stale cache / advisory data can produce
+      // an override target that is already superseded by what's installed.
+      if (!/^(latest|next|canary)$/.test(overrideVersion)) {
+        let installedVersion = ''
+        try {
+          const nmPath = join(project.path, 'node_modules', pkg, 'package.json')
+          if (existsSync(nmPath)) {
+            installedVersion = JSON.parse(readFileSync(nmPath, 'utf-8')).version || ''
+          }
+        } catch { /* can't read — skip guard */ }
+        if (installedVersion) {
+          const iv = installedVersion.replace(/^[\^~]/, '').split('.').map(n => parseInt(n, 10) || 0)
+          const ov = overrideVersion.replace(/^[\^~]/, '').split('.').map(n => parseInt(n, 10) || 0)
+          const isDowngrade = iv[0] > ov[0] || (iv[0] === ov[0] && iv[1] > ov[1]) || (iv[0] === ov[0] && iv[1] === ov[1] && (iv[2] ?? 0) > (ov[2] ?? 0))
+          if (isDowngrade) {
+            return NextResponse.json(
+              { error: `Refused: ${overrideVersion} is older than installed ${installedVersion} — package is already past this fix` },
+              { status: 409 }
+            )
+          }
+        }
+      }
+
       const pkgJsonPath = join(project.path, 'package.json')
       const pkgJsonRaw = readFileSync(pkgJsonPath, 'utf-8')
       const pkgJson = JSON.parse(pkgJsonRaw)
@@ -140,6 +181,18 @@ export async function POST(
         )
       }
 
+      // Post-override audit verification: confirm the advisory is actually gone.
+      // Nested copies (e.g. next pinning postcss@8.4.31) can survive an override install.
+      const auditCleared = await verifyOverrideAuditClear(project.path, detectedPm, pkg)
+      if (!auditCleared) {
+        // Revert — override didn't actually fix it
+        await execFileAsync('git', ['checkout', '--', 'package.json'], { cwd: project.path, timeout: 30000 })
+        return NextResponse.json(
+          { error: `Override applied but advisory still present after install — nested copy may have survived. Try deleting the lockfile and reinstalling, or use a version range that covers all copies.` },
+          { status: 422 }
+        )
+      }
+
       // Commit + push based on escalation config or emergency flag
       const shouldCommit = escalationCfg.autoCommit || emergency
       const shouldPush = escalationCfg.autoPush || emergency
@@ -180,10 +233,13 @@ export async function POST(
         }
       } catch (commitErr) {
         // Revert both package.json and lockfile on failure
+        let revertNote = ''
         try {
           await execFileAsync('git', ['checkout', '--', 'package.json', lockfileName], { cwd: project.path, timeout: 30000 })
-        } catch { /* ignore revert errors */ }
-        return NextResponse.json({ error: `Commit/push failed: ${gitErrMsg(commitErr)}` }, { status: 500 })
+        } catch (revertErr) {
+          revertNote = ` (revert also failed: ${gitErrMsg(revertErr)} — repo may be in a dirty state)`
+        }
+        return NextResponse.json({ error: `Commit/push failed: ${gitErrMsg(commitErr)}${revertNote}` }, { status: 500 })
       }
     } else if (action === 'force_major') {
       if (!targetVersion) {
