@@ -58,7 +58,8 @@ export async function POST(
     });
   } catch (error) {
     console.error('Git push failed:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Git push failed';
+    const stderr = error && typeof error === 'object' && 'stderr' in error ? (error as { stderr?: string }).stderr?.trim() : ''
+    const errorMessage = stderr || (error instanceof Error ? error.message : 'Git push failed');
 
     // Log failure
     logger.error('git', 'push_failed', `Push failed: ${errorMessage}`, {

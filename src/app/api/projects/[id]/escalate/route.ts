@@ -144,16 +144,34 @@ export async function POST(
       const shouldCommit = escalationCfg.autoCommit || emergency
       const shouldPush = escalationCfg.autoPush || emergency
 
+      // Helper to extract the most useful message from an execFile error
+      const gitErrMsg = (e: unknown) => {
+        if (e && typeof e === 'object' && 'stderr' in e && (e as { stderr?: string }).stderr) {
+          return (e as { stderr: string }).stderr.trim()
+        }
+        return e instanceof Error ? e.message : String(e)
+      }
+
       try {
         if (shouldCommit) {
           await execFileAsync('git', ['add', 'package.json', lockfileName], { cwd: project.path, timeout: 30000 })
-          await execFileAsync('git', ['commit', '-m', `fix(deps): force override ${pkg}@${overrideVersion} — ${reason}`], { cwd: project.path, timeout: 30000 })
+          try {
+            await execFileAsync('git', ['commit', '-m', `fix(deps): force override ${pkg}@${overrideVersion} — ${reason}`], { cwd: project.path, timeout: 30000 })
+          } catch (commitErr) {
+            const stderr = gitErrMsg(commitErr)
+            // "nothing to commit" means this was already committed (e.g. a retry) — treat as success
+            if (stderr.includes('nothing to commit') || stderr.includes('nothing added to commit')) {
+              // fall through to push
+            } else {
+              throw commitErr
+            }
+          }
         }
         if (shouldPush) {
           try {
             await execFileAsync('git', ['push'], { cwd: project.path, timeout: 60000 })
           } catch (pushErr) {
-            const pushMsg = pushErr instanceof Error ? pushErr.message : String(pushErr)
+            const pushMsg = gitErrMsg(pushErr)
             if (!pushMsg.includes('non-fast-forward') && !pushMsg.includes('rejected')) throw pushErr
             // Remote moved ahead (e.g. Dependabot) — rebase and retry
             await execFileAsync('git', ['pull', '--rebase', '--autostash'], { cwd: project.path, timeout: 60000 })
@@ -165,7 +183,7 @@ export async function POST(
         try {
           await execFileAsync('git', ['checkout', '--', 'package.json', lockfileName], { cwd: project.path, timeout: 30000 })
         } catch { /* ignore revert errors */ }
-        return NextResponse.json({ error: `Commit/push failed: ${commitErr instanceof Error ? commitErr.message : String(commitErr)}` }, { status: 500 })
+        return NextResponse.json({ error: `Commit/push failed: ${gitErrMsg(commitErr)}` }, { status: 500 })
       }
     } else if (action === 'force_major') {
       if (!targetVersion) {
