@@ -1,5 +1,4 @@
 const { createServer } = require('http');
-const { parse } = require('url');
 const next = require('next');
 const { WebSocketServer } = require('ws');
 const pty = require('node-pty');
@@ -18,7 +17,7 @@ app.prepare().then(() => {
   const upgradeHandler = app.getUpgradeHandler();
   const server = createServer(async (req, res) => {
     try {
-      const parsedUrl = parse(req.url, true);
+      const parsedUrl = new URL(req.url, `http://${hostname}:${port}`);
       await handle(req, res, parsedUrl);
     } catch (err) {
       console.error('Error occurred handling', req.url, err);
@@ -32,7 +31,7 @@ app.prepare().then(() => {
 
   // Handle WebSocket upgrades
   server.on('upgrade', (req, socket, head) => {
-    const { pathname } = parse(req.url, true);
+    const { pathname } = new URL(req.url, `http://${hostname}:${port}`);
 
     if (pathname === '/api/shell/ws') {
       // Handle shell WebSocket
