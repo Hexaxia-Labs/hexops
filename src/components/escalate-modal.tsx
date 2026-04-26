@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -37,6 +37,8 @@ export function EscalateModal({ open, item, projectEscalationConfig, onClose, on
   const [autoPush, setAutoPush] = useState(projectEscalationConfig?.autoPush ?? false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [fetchingVersion, setFetchingVersion] = useState(false)
+  const versionFetchedFor = useRef<string | null>(null)
 
   // Reset field state when the modal opens for a new item
   useEffect(() => {
@@ -49,6 +51,27 @@ export function EscalateModal({ open, item, projectEscalationConfig, onClose, on
     setAutoCommit(projectEscalationConfig?.autoCommit ?? false)
     setAutoPush(projectEscalationConfig?.autoPush ?? false)
     setError(null)
+    versionFetchedFor.current = null
+  }, [item?.package, item?.projectId, open])
+
+  // Auto-fetch latest version from npm registry when version field would be empty
+  useEffect(() => {
+    if (!item || !open) return
+    const key = `${item.package}@${item.projectId}`
+    if (versionFetchedFor.current === key) return
+    if (semverLike(item.targetVersion)) return  // already have a good version
+    versionFetchedFor.current = key
+    setFetchingVersion(true)
+    fetch(`https://registry.npmjs.org/${encodeURIComponent(item.package)}/latest`)
+      .then(r => r.ok ? r.json() : null)
+      .then((data: { version?: string } | null) => {
+        if (data?.version) {
+          setOverrideVersion(data.version)
+          setTargetVersion(data.version)
+        }
+      })
+      .catch(() => { /* registry unreachable — user can type manually */ })
+      .finally(() => setFetchingVersion(false))
   }, [item?.package, item?.projectId, open])
 
   const maxDays = projectEscalationConfig?.acceptedRiskMaxDays ?? 90
@@ -127,17 +150,18 @@ export function EscalateModal({ open, item, projectEscalationConfig, onClose, on
                       className="mt-1 h-8 text-sm"
                       value={overrideVersion}
                       onChange={e => setOverrideVersion(e.target.value)}
-                      placeholder="e.g. 2.17.3"
+                      placeholder={fetchingVersion ? 'Fetching latest…' : 'e.g. 2.17.3'}
+                      disabled={fetchingVersion}
                     />
-                    {item.targetVersion && /^\d+\.\d+/.test(item.targetVersion) ? (
+                    {semverLike(item.targetVersion) ? (
                       <p className="text-xs text-muted-foreground mt-1">
-                        Suggested: <span className="font-mono text-blue-400">{item.targetVersion}</span> — minimum safe version from audit
+                        From audit: minimum safe version is <span className="font-mono text-blue-400">{item.targetVersion}</span>
                       </p>
-                    ) : (
+                    ) : overrideVersion && !fetchingVersion ? (
                       <p className="text-xs text-muted-foreground mt-1">
-                        Check <a href={`https://www.npmjs.com/package/${item.package}`} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">npmjs.com/{item.package}</a> for the latest version
+                        Latest from registry — verify this is safe before pinning
                       </p>
-                    )}
+                    ) : null}
                   </div>
                   <div className="flex items-center justify-between">
                     <Label className="text-xs">Auto-commit</Label>

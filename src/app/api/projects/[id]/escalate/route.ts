@@ -107,8 +107,18 @@ export async function POST(
         if (!pkgJson.pnpm.overrides) pkgJson.pnpm.overrides = {}
         pkgJson.pnpm.overrides[pkg] = overrideVersion
       } else if (detectedPm === 'npm') {
-        if (!pkgJson.overrides) pkgJson.overrides = {}
-        pkgJson.overrides[pkg] = overrideVersion
+        if (pkgJson.dependencies?.[pkg] !== undefined) {
+          // npm EOVERRIDE: can't override a direct dep — update the dep version directly.
+          pkgJson.dependencies[pkg] = overrideVersion
+        } else {
+          // For devDeps: remove first to avoid EOVERRIDE, then write the flat override.
+          // Flat override is needed to fix nested copies (e.g. deep transitive pinned versions).
+          if (!pkgJson.overrides) pkgJson.overrides = {}
+          if (pkgJson.devDependencies?.[pkg] !== undefined) {
+            delete pkgJson.devDependencies[pkg]
+          }
+          pkgJson.overrides[pkg] = overrideVersion
+        }
       } else {
         // yarn uses "resolutions"
         if (!pkgJson.resolutions) pkgJson.resolutions = {}
