@@ -27,44 +27,46 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
   const [totalCount, setTotalCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (signal?: AbortSignal) => {
     try {
-      // Use lightweight sidebar endpoint (no extended status)
-      const res = await fetch('/api/sidebar');
-      if (!res.ok) throw new Error('Failed to fetch');
+      const res = await fetch('/api/sidebar', { signal });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
 
       const projects: ProjectStatus[] = data.projects || [];
 
-      // Extract unique categories
       const cats = [...new Set(projects.map(p => p.category))].filter(Boolean).sort();
       setCategories(cats);
 
-      // Count projects per category
       const counts: Record<string, number> = {};
       for (const cat of cats) {
         counts[cat] = projects.filter(p => p.category === cat).length;
       }
       setProjectCounts(counts);
 
-      // Count running and total
       setRunningCount(projects.filter(p => p.status === 'running').length);
       setTotalCount(projects.length);
     } catch (error) {
-      console.error('Failed to fetch sidebar data:', error);
+      if (error instanceof Error && error.name === 'AbortError') return;
+      // Swallow network errors silently — server may still be starting up
     } finally {
       setIsLoading(false);
     }
   }, []);
 
-  // Initial fetch
+  // Initial fetch with abort on unmount
   useEffect(() => {
-    fetchData();
+    const controller = new AbortController();
+    fetchData(controller.signal);
+    return () => controller.abort();
   }, [fetchData]);
 
-  // Poll for updates every 10 seconds
+  // Poll for updates every 10 seconds with abort on unmount
   useEffect(() => {
-    const interval = setInterval(fetchData, 10000);
+    const interval = setInterval(() => {
+      const controller = new AbortController();
+      fetchData(controller.signal);
+    }, 10000);
     return () => clearInterval(interval);
   }, [fetchData]);
 
@@ -75,7 +77,7 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
       runningCount,
       totalCount,
       isLoading,
-      refresh: fetchData,
+      refresh: () => fetchData(),
     }}>
       {children}
     </SidebarContext.Provider>
