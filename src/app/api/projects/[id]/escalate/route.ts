@@ -150,7 +150,15 @@ export async function POST(
           await execFileAsync('git', ['commit', '-m', `fix(deps): force override ${pkg}@${overrideVersion} — ${reason}`], { cwd: project.path, timeout: 30000 })
         }
         if (shouldPush) {
-          await execFileAsync('git', ['push'], { cwd: project.path, timeout: 60000 })
+          try {
+            await execFileAsync('git', ['push'], { cwd: project.path, timeout: 60000 })
+          } catch (pushErr) {
+            const pushMsg = pushErr instanceof Error ? pushErr.message : String(pushErr)
+            if (!pushMsg.includes('non-fast-forward') && !pushMsg.includes('rejected')) throw pushErr
+            // Remote moved ahead (e.g. Dependabot) — rebase and retry
+            await execFileAsync('git', ['pull', '--rebase', '--autostash'], { cwd: project.path, timeout: 60000 })
+            await execFileAsync('git', ['push'], { cwd: project.path, timeout: 60000 })
+          }
         }
       } catch (commitErr) {
         // Revert both package.json and lockfile on failure
