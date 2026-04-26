@@ -469,6 +469,8 @@ export default function PatchesPage() {
   }, [fetchProjectGitStatus]);
 
   const handleScan = () => {
+    const count = data?.projectCount;
+    toast.info(`Cache cleared — rescanning ${count ? `${count} projects` : 'all projects'}…`, { duration: 3000 });
     setScanning(true);
     setLoading(true);
     fetchPatches(true);
