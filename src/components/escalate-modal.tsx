@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -91,6 +92,7 @@ export function EscalateModal({ open, item, projectEscalationConfig, onClose, on
     <Dialog open={open} onOpenChange={open => !open && onClose()}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
+          <DialogDescription className="sr-only">Choose an escalation action for this package: accept the risk, force an override, or force a major version update.</DialogDescription>
           <DialogTitle className="flex items-center gap-2">
             <AlertTriangle className="h-4 w-4 text-amber-500" />
             Escalate: {item.package}
