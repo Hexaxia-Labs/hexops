@@ -521,9 +521,15 @@ export async function scanVulnerabilities(
     // This happens when npm audit references an advisory whose patched_versions only
     // covers an older major (e.g. next <9.3.3 advisory while installed is 16.2.4).
     // The package is already beyond the vulnerable range — no action needed.
+    //
+    // Exception: fixViaOverride entries must NOT be filtered by the top-level installed
+    // version. The vulnerable copy is nested (e.g. next/node_modules/postcss @8.4.31)
+    // while the top-level version may already be patched. npm audit is the authoritative
+    // source — if it still reports the vuln, the override hasn't been applied yet.
     return result.filter(vuln => {
       if (!vuln.fixVersion || !vuln.currentVersion) return true;
       if (vuln.fixVersion === 'latest' || vuln.fixVersion === 'resolve-latest') return true;
+      if (vuln.fixViaOverride) return true;
       return !semverGte(vuln.currentVersion, vuln.fixVersion);
     });
   } catch (error) {
