@@ -121,16 +121,23 @@ export function generatePatchId(): string {
 }
 
 /**
- * Reconcile patch history for a project against actual installed versions.
- * Marks recent "success" entries as failed if the package version didn't
- * actually change (e.g., due to pnpm soft failures before detection was added).
+ * Reconcile patch history for a project against the current scan results.
+ *
+ * Two checks:
+ * 1. Version unchanged — installed version still matches fromVersion, not toVersion.
+ *    Catches top-level installs that silently no-oped.
+ * 2. Still vulnerable — package still appears in the live advisory list from the scan.
+ *    Catches nested-copy false positives (e.g. next pinning postcss@8.4.31 internally)
+ *    that a top-level node_modules check can never detect.
  *
  * @param projectId - The project to reconcile
  * @param installedVersions - Map of package name -> currently installed version
+ * @param stillVulnerablePackages - Set of package names that still appear in the current audit
  */
 export function reconcilePatchHistory(
   projectId: string,
-  installedVersions: Record<string, string>
+  installedVersions: Record<string, string>,
+  stillVulnerablePackages: Set<string> = new Set(),
 ): number {
   const history = readPatchHistory();
   let corrected = 0;
@@ -139,11 +146,17 @@ export function reconcilePatchHistory(
     if (entry.projectId !== projectId) continue;
     if (!entry.success) continue;
 
+    // Check 1: advisory still present → nested copy survived the patch
+    if (stillVulnerablePackages.has(entry.package)) {
+      entry.success = false;
+      entry.error = `Retroactively marked failed: ${entry.package} still appears as vulnerable after patch (nested copy may have survived the override)`;
+      corrected++;
+      continue;
+    }
+
+    // Check 2: top-level version unchanged → install silently no-oped
     const installed = installedVersions[entry.package];
     if (!installed) continue;
-
-    // If the installed version still matches fromVersion (not toVersion),
-    // this "successful" patch didn't actually take effect
     if (installed === entry.fromVersion && installed !== entry.toVersion) {
       entry.success = false;
       entry.error = `Retroactively marked failed: ${entry.package} still at ${installed} (expected ${entry.toVersion})`;
