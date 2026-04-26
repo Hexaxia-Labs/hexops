@@ -19,6 +19,9 @@ const HISTORY_FILE = join(PATCHES_DIR, 'history.json');
 const CACHE_TTL_BASE_MS = 60 * 60 * 1000;
 const CACHE_TTL_JITTER_MS = 15 * 60 * 1000;
 
+// Bump when the cache schema changes to force automatic invalidation of old entries
+const CACHE_SCHEMA_VERSION = 2;
+
 function getCacheTTL(): number {
   return CACHE_TTL_BASE_MS + Math.floor(Math.random() * CACHE_TTL_JITTER_MS);
 }
@@ -167,7 +170,7 @@ function getCacheFilePath(projectId: string): string {
 }
 
 /**
- * Read project cache (returns null if expired or missing)
+ * Read project cache (returns null if expired, missing, or wrong schema version)
  */
 export function readProjectCache(projectId: string): ProjectPatchCache | null {
   ensurePatchStorageDir();
@@ -177,7 +180,11 @@ export function readProjectCache(projectId: string): ProjectPatchCache | null {
   }
   try {
     const content = readFileSync(cacheFile, 'utf-8');
-    const cache: ProjectPatchCache = JSON.parse(content);
+    const cache: ProjectPatchCache & { schemaVersion?: number } = JSON.parse(content);
+    // Reject caches written before the current schema version
+    if ((cache.schemaVersion ?? 1) < CACHE_SCHEMA_VERSION) {
+      return null;
+    }
     // Check if expired
     if (new Date(cache.expiresAt) < new Date()) {
       return null;
@@ -218,7 +225,8 @@ export function createProjectCache(
     outdated,
     vulnerabilities,
     ...(activeOverrides && activeOverrides.length > 0 ? { activeOverrides } : {}),
-  };
+    schemaVersion: CACHE_SCHEMA_VERSION,
+  } as ProjectPatchCache;
 }
 
 /**

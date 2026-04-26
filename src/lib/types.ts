@@ -326,4 +326,5 @@ export interface ProjectPatchCache {
   outdated: OutdatedPackage[];
   vulnerabilities: VulnerabilityInfo[];
   activeOverrides?: ActiveOverride[];
+  schemaVersion?: number;
 }
