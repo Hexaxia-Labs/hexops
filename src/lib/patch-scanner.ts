@@ -12,6 +12,7 @@ import type {
   PatchSummary,
   ProjectPatchCache,
   PackageManager,
+  ActiveOverride,
 } from './types';
 import {
   readProjectCache,
@@ -40,6 +41,54 @@ function semverGte(a: string, b: string): boolean {
     if (av < bv) return false;
   }
   return true; // equal
+}
+
+/**
+ * Read active package manager overrides from a project's package.json.
+ * Marks each override as stale when no current vulnerability references that package name.
+ */
+function readActiveOverrides(projectPath: string, pm: PackageManager, vulnNames: Set<string>): ActiveOverride[] {
+  const pkgJsonPath = join(projectPath, 'package.json');
+  if (!existsSync(pkgJsonPath)) return [];
+
+  let pkgJson: Record<string, unknown>;
+  try {
+    pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
+  } catch { return []; }
+
+  const overrides: ActiveOverride[] = [];
+
+  if (pm === 'pnpm') {
+    const pnpmSection = pkgJson.pnpm as Record<string, unknown> | undefined;
+    const pnpmOverrides = pnpmSection?.overrides as Record<string, string> | undefined;
+    if (pnpmOverrides) {
+      for (const [pkg, version] of Object.entries(pnpmOverrides)) {
+        if (typeof version === 'string') {
+          overrides.push({ package: pkg, version, packageManager: 'pnpm', overrideKey: 'pnpm.overrides', stale: !vulnNames.has(pkg) });
+        }
+      }
+    }
+  } else if (pm === 'yarn') {
+    const resolutions = pkgJson.resolutions as Record<string, string> | undefined;
+    if (resolutions) {
+      for (const [pkg, version] of Object.entries(resolutions)) {
+        if (typeof version === 'string') {
+          overrides.push({ package: pkg, version, packageManager: 'yarn', overrideKey: 'resolutions', stale: !vulnNames.has(pkg) });
+        }
+      }
+    }
+  } else {
+    const npmOverrides = pkgJson.overrides as Record<string, unknown> | undefined;
+    if (npmOverrides) {
+      for (const [pkg, version] of Object.entries(npmOverrides)) {
+        if (typeof version === 'string') {
+          overrides.push({ package: pkg, version, packageManager: 'npm', overrideKey: 'overrides', stale: !vulnNames.has(pkg) });
+        }
+      }
+    }
+  }
+
+  return overrides;
 }
 
 /**
@@ -533,8 +582,13 @@ export async function scanProject(
   const annotatedOutdated = outdated.map((pkg) => ({ ...pkg, dependabotManaged: isManaged }));
   const annotatedVulnerabilities = vulnerabilities.map((v) => ({ ...v, dependabotManaged: isManaged }));
 
+  // Read active overrides from package.json; mark stale if no vuln references that package
+  const pm = detectPackageManager(project.path);
+  const vulnNames = new Set(annotatedVulnerabilities.map(v => v.name));
+  const activeOverrides = readActiveOverrides(project.path, pm, vulnNames);
+
   // Create and save cache
-  const cache = createProjectCache(project.id, annotatedOutdated, annotatedVulnerabilities);
+  const cache = createProjectCache(project.id, annotatedOutdated, annotatedVulnerabilities, activeOverrides);
   writeProjectCache(cache);
 
   // Update aggregate state

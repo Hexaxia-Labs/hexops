@@ -2,7 +2,24 @@ import { NextRequest } from 'next/server';
 import { getProjects, getCategories } from '@/lib/config';
 import { readPatchState, readProjectCache } from '@/lib/patch-storage';
 import { scanProject, buildPriorityQueue } from '@/lib/patch-scanner';
-import type { ProjectPatchCache } from '@/lib/types';
+import type { ProjectPatchCache, ActiveOverride } from '@/lib/types';
+
+interface ProjectOverride extends ActiveOverride {
+  projectId: string;
+  projectName: string;
+}
+
+function collectOverrides(caches: ProjectPatchCache[], projectMap: Record<string, string>): ProjectOverride[] {
+  const result: ProjectOverride[] = [];
+  for (const cache of caches) {
+    if (!cache.activeOverrides?.length) continue;
+    const projectName = projectMap[cache.projectId] || cache.projectId;
+    for (const o of cache.activeOverrides) {
+      result.push({ ...o, projectId: cache.projectId, projectName });
+    }
+  }
+  return result;
+}
 
 export const dynamic = 'force-dynamic';
 
@@ -39,6 +56,7 @@ export async function GET(request: NextRequest) {
         .filter((c): c is ProjectPatchCache => c !== null);
 
       const { queue, summary } = buildPriorityQueue(caches, projectMap, holdsMap);
+      const activeOverrides = collectOverrides(caches, projectMap);
 
       const stream = new ReadableStream({
         start(controller) {
@@ -51,6 +69,7 @@ export async function GET(request: NextRequest) {
             categories,
             projectCategories,
             projectNames: projectMap,
+            activeOverrides,
           }));
           controller.close();
         },
@@ -100,6 +119,7 @@ export async function GET(request: NextRequest) {
 
       const validCaches = caches.filter((c): c is ProjectPatchCache => c !== null);
       const { queue, summary } = buildPriorityQueue(validCaches, projectMap, holdsMap);
+      const activeOverrides = collectOverrides(validCaches, projectMap);
 
       controller.enqueue(sseEvent({
         type: 'complete',
@@ -110,6 +130,7 @@ export async function GET(request: NextRequest) {
         categories,
         projectCategories,
         projectNames: projectMap,
+        activeOverrides,
       }));
 
       controller.close();

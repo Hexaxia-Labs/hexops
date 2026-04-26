@@ -13,6 +13,7 @@ import type { PatchQueueItem, PatchSummary } from '@/lib/types';
 import { DependabotPanel } from '@/components/detail-sections/dependabot-panel';
 import { EscalateModal } from '@/components/escalate-modal';
 import { AcceptedRiskPanel } from '@/components/accepted-risk-panel';
+import { ActiveOverridesPanel, type ProjectOverride } from '@/components/active-overrides-panel';
 import { generatePatchCommitMessage, type UpdatedPackage } from '@/lib/patch-commit-message';
 import { GitCommit, Upload, Pencil, X } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
@@ -25,6 +26,7 @@ interface PatchesData {
   categories: string[];
   projectCategories: Record<string, string>;  // projectId -> category
   projectNames: Record<string, string>;  // projectId -> name
+  activeOverrides?: ProjectOverride[];
 }
 
 type FilterType = 'all' | 'vulns' | 'outdated';
@@ -931,6 +933,14 @@ export default function PatchesPage() {
             )}
           </div>
         </div>
+
+        {/* Active Overrides Panel */}
+        {data.activeOverrides && data.activeOverrides.length > 0 && (
+          <ActiveOverridesPanel
+            overrides={data.activeOverrides}
+            onRemoved={() => fetchPatches(true)}
+          />
+        )}
 
         {/* Filters & Actions */}
         <div className="border-b border-zinc-800 px-6 py-3 flex items-center justify-between">
