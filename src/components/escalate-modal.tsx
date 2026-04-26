@@ -29,8 +29,9 @@ interface EscalateModalProps {
 export function EscalateModal({ open, item, projectEscalationConfig, onClose, onSuccess }: EscalateModalProps) {
   const [action, setAction] = useState<EscalateAction>('force_override')
   const [reason, setReason] = useState('')
-  const [overrideVersion, setOverrideVersion] = useState(item?.targetVersion ?? '')
-  const [targetVersion, setTargetVersion] = useState(item?.targetVersion ?? '')
+  const semverLike = (v?: string) => !!v && /^\d+\.\d+/.test(v) ? v : ''
+  const [overrideVersion, setOverrideVersion] = useState(semverLike(item?.targetVersion))
+  const [targetVersion, setTargetVersion] = useState(semverLike(item?.targetVersion))
   const [expiresAt, setExpiresAt] = useState('')
   const [autoCommit, setAutoCommit] = useState(projectEscalationConfig?.autoCommit ?? false)
   const [autoPush, setAutoPush] = useState(projectEscalationConfig?.autoPush ?? false)
@@ -42,8 +43,8 @@ export function EscalateModal({ open, item, projectEscalationConfig, onClose, on
     if (!item) return
     setAction('force_override')
     setReason('')
-    setOverrideVersion(item.targetVersion ?? '')
-    setTargetVersion(item.targetVersion ?? '')
+    setOverrideVersion(semverLike(item.targetVersion))
+    setTargetVersion(semverLike(item.targetVersion))
     setExpiresAt('')
     setAutoCommit(projectEscalationConfig?.autoCommit ?? false)
     setAutoPush(projectEscalationConfig?.autoPush ?? false)
@@ -128,6 +129,15 @@ export function EscalateModal({ open, item, projectEscalationConfig, onClose, on
                       onChange={e => setOverrideVersion(e.target.value)}
                       placeholder="e.g. 2.17.3"
                     />
+                    {item.targetVersion && /^\d+\.\d+/.test(item.targetVersion) ? (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Suggested: <span className="font-mono text-blue-400">{item.targetVersion}</span> — minimum safe version from audit
+                      </p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Check <a href={`https://www.npmjs.com/package/${item.package}`} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">npmjs.com/{item.package}</a> for the latest version
+                      </p>
+                    )}
                   </div>
                   <div className="flex items-center justify-between">
                     <Label className="text-xs">Auto-commit</Label>
@@ -168,7 +178,16 @@ export function EscalateModal({ open, item, projectEscalationConfig, onClose, on
                     onChange={e => setTargetVersion(e.target.value)}
                     placeholder="e.g. 4.0.0"
                   />
-                  <p className="text-xs text-amber-600 mt-2">
+                  {item.targetVersion && /^\d+\.\d+/.test(item.targetVersion) ? (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Suggested: <span className="font-mono text-amber-400">{item.targetVersion}</span>
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Check <a href={`https://www.npmjs.com/package/${item.package}`} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">npmjs.com/{item.package}</a> for the latest version
+                    </p>
+                  )}
+                  <p className="text-xs text-amber-600 mt-1">
                     ⚠ Breaking changes likely. Test thoroughly before merging.
                   </p>
                 </div>
