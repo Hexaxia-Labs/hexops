@@ -476,6 +476,60 @@ export async function POST(
       }
 
       if (directPkgs.length > 0) {
+        // Override conflict resolution: if a direct-dep update target has an existing
+        // pnpm.overrides / npm overrides / yarn resolutions entry that pins an older version,
+        // that override will silently win and the update will appear to succeed but nothing
+        // actually changes. Strip or update conflicting entries before running install.
+        try {
+          const pkgJsonPath = join(cwd, 'package.json');
+          const pkgJsonRaw = readFileSync(pkgJsonPath, 'utf-8');
+          const pkgJson = JSON.parse(pkgJsonRaw);
+
+          const overridesKey = packageManager === 'pnpm' ? null : 'overrides';
+          const pnpmOverrides: Record<string, string> | undefined = pkgJson?.pnpm?.overrides;
+          const npmOverrides: Record<string, string> | undefined = pkgJson?.overrides;
+          const yarnResolutions: Record<string, string> | undefined = pkgJson?.resolutions;
+
+          let changed = false;
+          for (const pkg of directPkgs) {
+            const isFloating = /^(latest|next|canary)$/.test(pkg.targetVersion);
+            // Check pnpm overrides
+            if (pnpmOverrides?.[pkg.name] !== undefined) {
+              const pinned = pnpmOverrides[pkg.name];
+              if (isFloating || pinned !== pkg.targetVersion) {
+                delete pkgJson.pnpm.overrides[pkg.name];
+                changed = true;
+                logger.info('patches', 'override_conflict_removed', `Removed conflicting pnpm.overrides[${pkg.name}]=${pinned} before updating to ${pkg.targetVersion}`, { projectId: id, meta: { package: pkg.name } });
+              }
+            }
+            // Check npm overrides
+            if (npmOverrides?.[pkg.name] !== undefined) {
+              const pinned = npmOverrides[pkg.name];
+              if (isFloating || pinned !== pkg.targetVersion) {
+                delete pkgJson.overrides[pkg.name];
+                changed = true;
+                logger.info('patches', 'override_conflict_removed', `Removed conflicting overrides[${pkg.name}]=${pinned} before updating to ${pkg.targetVersion}`, { projectId: id, meta: { package: pkg.name } });
+              }
+            }
+            // Check yarn resolutions
+            if (yarnResolutions?.[pkg.name] !== undefined) {
+              const pinned = yarnResolutions[pkg.name];
+              if (isFloating || pinned !== pkg.targetVersion) {
+                delete pkgJson.resolutions[pkg.name];
+                changed = true;
+                logger.info('patches', 'override_conflict_removed', `Removed conflicting resolutions[${pkg.name}]=${pinned} before updating to ${pkg.targetVersion}`, { projectId: id, meta: { package: pkg.name } });
+              }
+            }
+          }
+
+          if (changed) {
+            const indent = pkgJsonRaw.match(/^(\s+)/m)?.[1] || '  ';
+            writeFileSync(pkgJsonPath, JSON.stringify(pkgJson, null, indent) + '\n', 'utf-8');
+          }
+        } catch {
+          // Non-fatal: if we can't read/write package.json, proceed and let install fail naturally
+        }
+
         // Build batched install command — single tree resolution for all packages
         const pkgSpecs = directPkgs.map(p => `${p.name}@${p.targetVersion}`);
         let batchCmd: string;
