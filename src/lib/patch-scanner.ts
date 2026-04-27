@@ -496,6 +496,13 @@ export async function scanVulnerabilities(
           }
         }
 
+        // Self-advisory: not a direct dep, advisory is on the package itself (no string
+        // parents in via[]), but fixVersion was resolved directly from the advisory range.
+        // Must go through the override mechanism — it can't be updated as a direct dep.
+        if (!vuln.isDirect && !parentPackage && !viaChain?.length && fixVersion && !fixViaOverride) {
+          fixViaOverride = true;
+        }
+
         result.push({
           name,
           severity: vuln.severity as VulnSeverity,
