@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { PatchesSidebar, type UpdateResult, type UpdateStatus } from '@/components/patches-sidebar';
-import { RefreshCw, Shield, Package, ArrowUp, List, FolderTree, ChevronDown, ChevronRight, AlertTriangle, Link as LinkIcon, PauseCircle, PlayCircle, ExternalLink, HelpCircle, Wrench, Siren } from 'lucide-react';
+import { RefreshCw, Shield, Package, ArrowUp, List, FolderTree, ChevronDown, ChevronRight, AlertTriangle, Link as LinkIcon, PauseCircle, PlayCircle, ExternalLink, HelpCircle, Wrench, Siren, TrendingUp } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import type { PatchQueueItem, PatchSummary } from '@/lib/types';
@@ -976,6 +976,12 @@ export default function PatchesPage() {
                   ? `Last scan: ${new Date(data.lastScan).toLocaleString()}`
                   : 'Never scanned'}
               </span>
+              <Link href="/patches/trends">
+                <Button variant="ghost" size="sm" className="border-zinc-700 text-zinc-400">
+                  <TrendingUp className="h-4 w-4 mr-2" />
+                  Trends
+                </Button>
+              </Link>
               <Button
                 variant="outline"
                 size="sm"
