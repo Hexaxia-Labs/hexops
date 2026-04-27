@@ -2,13 +2,14 @@ import { spawn, ChildProcess, execFileSync } from 'child_process';
 import { appendFileSync, readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import type { ProjectConfig, LogEntry } from './types';
+import { logger } from './logger';
 
-// Store active processes in memory with metadata
 interface ProcessEntry {
   process: ChildProcess;
   startedAt: Date;
 }
 const activeProcesses = new Map<string, ProcessEntry>();
+const stoppingProjects = new Set<string>();
 
 // Log directory path
 const LOGS_DIR = join(process.cwd(), '.hexops', 'logs');
@@ -110,9 +111,16 @@ export function startProject(
       },
     });
 
-    activeProcesses.set(project.id, {
-      process: child,
-      startedAt: new Date(),
+    const startedAt = new Date();
+    activeProcesses.set(project.id, { process: child, startedAt });
+
+    child.on('spawn', () => {
+      const pid = child.pid;
+      addLogEntry(project.id, 'stdout', `[SYS] Process started — PID ${pid ?? 'unknown'}, port ${project.port}, mode ${mode}`);
+      logger.info('projects', 'process:started', `${project.name} started`, {
+        projectId: project.id,
+        meta: { pid, port: project.port, mode, command: script },
+      });
     });
 
     child.stdout?.on('data', (data: Buffer) => {
@@ -123,13 +131,32 @@ export function startProject(
       addLogEntry(project.id, 'stderr', data.toString());
     });
 
-    child.on('close', (code) => {
-      addLogEntry(project.id, 'stdout', `Process exited with code ${code}`);
+    child.on('close', (code, signal) => {
+      const intentional = stoppingProjects.has(project.id);
+      stoppingProjects.delete(project.id);
       activeProcesses.delete(project.id);
+
+      if (intentional || code === 0) {
+        addLogEntry(project.id, 'stdout', `[SYS] Process stopped (code ${code ?? signal})`);
+        logger.info('projects', 'process:stopped', `${project.name} stopped`, {
+          projectId: project.id,
+          meta: { code, signal, intentional },
+        });
+      } else {
+        addLogEntry(project.id, 'stderr', `[SYS] Process crashed — exit code ${code ?? 'null'}, signal ${signal ?? 'none'}`);
+        logger.error('projects', 'process:crashed', `${project.name} crashed`, {
+          projectId: project.id,
+          meta: { code, signal },
+        });
+      }
     });
 
     child.on('error', (error) => {
-      addLogEntry(project.id, 'stderr', `Process error: ${error.message}`);
+      addLogEntry(project.id, 'stderr', `[SYS] Process error: ${error.message}`);
+      logger.error('projects', 'process:error', `${project.name} process error`, {
+        projectId: project.id,
+        meta: { error: error.message },
+      });
       activeProcesses.delete(project.id);
     });
 
@@ -142,12 +169,13 @@ export function startProject(
 
 export function stopProject(projectId: string, port: number): { success: boolean; error?: string } {
   // First try to kill the tracked process
+  stoppingProjects.add(projectId);
   const entry = activeProcesses.get(projectId);
   if (entry && !entry.process.killed) {
     try {
       entry.process.kill('SIGTERM');
       activeProcesses.delete(projectId);
-      addLogEntry(projectId, 'stdout', 'Process stopped via SIGTERM');
+      addLogEntry(projectId, 'stdout', '[SYS] Process stopped via SIGTERM');
       return { success: true };
     } catch {
       // Fall through to port-based kill
@@ -184,7 +212,7 @@ export function stopProject(projectId: string, port: number): { success: boolean
         }
       }
       activeProcesses.delete(projectId);
-      addLogEntry(projectId, 'stdout', `Process killed via port ${port}`);
+      addLogEntry(projectId, 'stdout', `[SYS] Process killed via port ${port}`);
       return { success: true };
     }
 
