@@ -3,6 +3,7 @@ import { getGlobalSettings } from './settings';
 import { scanProject } from './patch-scanner';
 import { readPatchState, writePatchState } from './patch-storage';
 import { logger } from './logger';
+import { addNotification } from './notifications';
 
 const INTERVALS_MS: Record<string, number> = {
   '1h': 60 * 60 * 1000,
@@ -22,8 +23,23 @@ async function runScan() {
     let scanned = 0;
     for (const project of projects) {
       try {
-        await scanProject(project, true);
+        const cache = await scanProject(project, true);
         scanned++;
+        if (cache) {
+          const criticals = (cache.vulnerabilities ?? []).filter(
+            (v: { severity: string }) => v.severity === 'critical' || v.severity === 'high'
+          );
+          if (criticals.length > 0) {
+            addNotification({
+              severity: criticals.some((v: { severity: string }) => v.severity === 'critical') ? 'critical' : 'error',
+              category: 'security',
+              title: `${criticals.length} critical/high vulnerabilit${criticals.length === 1 ? 'y' : 'ies'} in ${project.name}`,
+              message: criticals.map((v: { name: string; severity: string }) => `${v.name} (${v.severity})`).slice(0, 5).join(', '),
+              projectId: project.id,
+              actionUrl: '/patches',
+            });
+          }
+        }
       } catch (err) {
         logger.error('system', 'scheduled_scan:project_error', `Failed to scan ${project.id}`, {
           meta: { error: err instanceof Error ? err.message : String(err) },

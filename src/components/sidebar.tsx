@@ -5,6 +5,7 @@ import { Package, Plus, TerminalSquare, ScrollText, LayoutDashboard, Settings } 
 import { cn } from '@/lib/utils';
 import { APP_VERSION } from '@/lib/version';
 import { useSidebar } from '@/contexts/sidebar-context';
+import { NotificationBell } from '@/components/notification-bell';
 
 interface SidebarProps {
   selectedCategory?: string | null;
@@ -169,6 +170,9 @@ export function Sidebar({
       </nav>
 
       <div className="pt-4 border-t border-zinc-800 space-y-1">
+        <div className="flex items-center justify-center">
+          <NotificationBell />
+        </div>
         <p className="text-xs text-zinc-600 text-center">
           {runningCount} of {totalCount} running
         </p>
