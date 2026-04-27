@@ -1,6 +1,7 @@
 'use client';
 
 import { ReactNode, useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { SidebarProvider, useSidebar } from '@/contexts/sidebar-context';
 import { Sidebar } from '@/components/sidebar';
 import { AddProjectDialog } from '@/components/add-project-dialog';
@@ -16,6 +17,7 @@ function AppShell({ children }: { children: ReactNode }) {
   const [showShell, setShowShell] = useState(false);
   const [projectsRoot, setProjectsRoot] = useState<string>('');
   const { categories, refresh } = useSidebar();
+  const router = useRouter();
 
   // Fetch projectsRoot for shell default directory
   useEffect(() => {
@@ -24,6 +26,35 @@ function AppShell({ children }: { children: ReactNode }) {
       .then(data => setProjectsRoot(data.projectsRoot || ''))
       .catch(() => {});
   }, []);
+
+  // Global keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const ctrl = e.ctrlKey || e.metaKey;
+      const inInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName);
+
+      // Ctrl+1-4 — navigate pages (never in inputs)
+      if (ctrl && !inInput) {
+        if (e.key === '1') { e.preventDefault(); router.push('/'); return; }
+        if (e.key === '2') { e.preventDefault(); router.push('/patches'); return; }
+        if (e.key === '3') { e.preventDefault(); router.push('/logs'); return; }
+        if (e.key === '4') { e.preventDefault(); router.push('/settings'); return; }
+        // Ctrl+` — toggle shell panel
+        if (e.key === '`') { e.preventDefault(); setShowShell((s) => !s); return; }
+      }
+
+      // Ctrl+K or / — focus search input (even from inputs, allow escape)
+      if ((ctrl && e.key === 'k') || (!inInput && e.key === '/')) {
+        e.preventDefault();
+        const searchInput = document.querySelector<HTMLInputElement>('[data-shortcut="search"]');
+        if (searchInput) { searchInput.focus(); searchInput.select(); }
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [router]);
 
   return (
     <div className="flex h-screen bg-zinc-950">

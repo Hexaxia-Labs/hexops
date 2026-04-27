@@ -739,6 +739,25 @@ export default function PatchesPage() {
     }
   };
 
+  const handleBatchHold = useCallback(async (hold: boolean) => {
+    if (!data || selectedPackages.size === 0) return;
+    const selectedItems = (data.queue ?? []).filter((item) => selectedPackages.has(getItemKey(item)));
+    if (selectedItems.length === 0) return;
+
+    // Group by projectId
+    const byProject = new Map<string, string[]>();
+    for (const item of selectedItems) {
+      if (!byProject.has(item.projectId)) byProject.set(item.projectId, []);
+      byProject.get(item.projectId)!.push(item.package);
+    }
+
+    await Promise.all(
+      Array.from(byProject.entries()).flatMap(([projectId, pkgNames]) =>
+        pkgNames.map((pkg) => handleHold(projectId, pkg, hold))
+      )
+    );
+  }, [data, selectedPackages, handleHold]);
+
   const handleResolveLockfile = async (projectId: string) => {
     setResolvingProjects(prev => new Set(prev).add(projectId));
     try {
@@ -1137,6 +1156,17 @@ export default function PatchesPage() {
               >
                 <Wrench className={cn('h-3 w-3 mr-1', validating && 'animate-spin')} />
                 {validating ? (validationPhase ?? 'Validating…') : 'Validate'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs border-zinc-600 text-zinc-400 hover:bg-zinc-800"
+                onClick={() => handleBatchHold(true)}
+                disabled={updating}
+                title="Hold all selected packages"
+              >
+                <PauseCircle className="h-3 w-3 mr-1" />
+                Hold All
               </Button>
               <Button
                 size="sm"
