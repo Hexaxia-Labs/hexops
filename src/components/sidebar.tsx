@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Package, Plus, TerminalSquare, ScrollText, LayoutDashboard, Settings } from 'lucide-react';
+import { Package, Plus, TerminalSquare, ScrollText, LayoutDashboard, Settings, Share2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { APP_VERSION } from '@/lib/version';
 import { useSidebar } from '@/contexts/sidebar-context';
@@ -156,6 +156,17 @@ export function Sidebar({
             Shell
           </button>
         )}
+
+        <Link
+          href="/deps"
+          className={cn(
+            'w-full text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center gap-2',
+            'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50'
+          )}
+        >
+          <Share2 className="h-4 w-4" />
+          Dep Graph
+        </Link>
 
         <Link
           href="/settings"
