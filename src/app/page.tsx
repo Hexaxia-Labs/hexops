@@ -312,8 +312,9 @@ function HomeContent() {
                     <Input
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search projects…"
+                      placeholder="Search projects… (/)"
                       className="pl-8 pr-7 h-8 w-52 bg-zinc-800/50 border-zinc-700 text-sm text-zinc-200 placeholder:text-zinc-600 focus-visible:ring-zinc-600"
+                      data-shortcut="search"
                     />
                     {searchQuery && (
                       <button
