@@ -45,6 +45,7 @@ export interface ProjectConfig {
     repo: string;
   };
   propagation?: Partial<PropagationConfig>;
+  autostart?: boolean;
 }
 
 export interface ProjectExtendedStatus {

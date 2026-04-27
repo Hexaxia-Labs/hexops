@@ -667,6 +667,23 @@ export function ProjectDetail({
               <span className="text-xs text-zinc-500 font-mono">
                 {project.scripts.dev}
               </span>
+
+              {/* Autostart toggle */}
+              <label className="flex items-center gap-1.5 cursor-pointer ml-auto">
+                <span className="text-xs text-zinc-500">Autostart</span>
+                <button
+                  onClick={async () => {
+                    await fetch(`/api/projects/${project.id}/autostart`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ enabled: !project.autostart }),
+                    });
+                  }}
+                  className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors focus:outline-none ${project.autostart ? 'bg-purple-600' : 'bg-zinc-700'}`}
+                >
+                  <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${project.autostart ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+                </button>
+              </label>
             </div>
           </div>
 
