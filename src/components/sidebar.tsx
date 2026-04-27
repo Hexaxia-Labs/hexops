@@ -190,6 +190,11 @@ export function Sidebar({
         <p className="text-[10px] text-zinc-700 text-center">
           v{APP_VERSION}
         </p>
+        {process.env.NODE_ENV === 'development' && (
+          <p className="text-[9px] text-yellow-700 text-center leading-tight" title="API route changes require a server restart in dev mode — HMR does not apply to route handlers">
+            dev · restart after API changes
+          </p>
+        )}
       </div>
     </aside>
   );

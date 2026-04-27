@@ -2,6 +2,12 @@ const { createServer } = require('http');
 const next = require('next');
 const { WebSocketServer } = require('ws');
 const pty = require('node-pty');
+const { execSync } = require('child_process');
+
+// Capture startup fingerprint for stale-server detection
+const STARTED_AT = new Date().toISOString();
+let GIT_SHA = 'unknown';
+try { GIT_SHA = execSync('git rev-parse --short HEAD', { timeout: 3000 }).toString().trim(); } catch { /* ok */ }
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = 'localhost';
@@ -119,5 +125,9 @@ app.prepare().then(() => {
   server.listen(port, () => {
     console.log(`> Ready on http://${hostname}:${port}`);
     console.log(`> Shell WebSocket available at ws://${hostname}:${port}/api/shell/ws`);
+    console.log(`> Started at ${STARTED_AT} (git: ${GIT_SHA}) — restart server after API route changes in dev mode`);
+    // Expose via global so /api/health can surface it
+    global.__hexops_started_at = STARTED_AT;
+    global.__hexops_git_sha = GIT_SHA;
   });
 });
