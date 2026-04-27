@@ -17,14 +17,16 @@ interface VercelDeployment {
   state: string;
   created: string;
   target?: string;
+  uid?: string;
 }
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params;
+    const history = new URL(request.url).searchParams.get('history') === '1';
     const project = getProject(id);
 
     if (!project) {
@@ -69,27 +71,30 @@ export async function GET(
       });
     }
 
-    // Try to get latest deployment info using vercel CLI
+    // Fetch deployment list via vercel CLI
     let latestDeployment: VercelDeployment | null = null;
+    let deploymentHistory: VercelDeployment[] = [];
     try {
-      const { stdout } = await execAsync('vercel ls --json 2>/dev/null | head -1', {
+      const limit = history ? 10 : 1;
+      const { stdout } = await execAsync(`vercel ls --json 2>/dev/null | head -${limit}`, {
         cwd,
         timeout: 10000,
       });
 
       if (stdout.trim()) {
-        // Strip any warnings before JSON
         const jsonStart = stdout.search(/[\[{]/);
         const jsonOutput = jsonStart >= 0 ? stdout.slice(jsonStart) : '[]';
         const deployments = JSON.parse(jsonOutput);
         if (Array.isArray(deployments) && deployments.length > 0) {
-          const latest = deployments[0];
-          latestDeployment = {
-            url: latest.url || latest.alias?.[0],
-            state: latest.state || latest.readyState,
-            created: latest.created || latest.createdAt,
-            target: latest.target,
-          };
+          const normalize = (d: Record<string, unknown>): VercelDeployment => ({
+            uid: d.uid as string | undefined,
+            url: (d.url || (Array.isArray(d.alias) ? d.alias[0] : undefined)) as string,
+            state: (d.state || d.readyState) as string,
+            created: (d.created || d.createdAt) as string,
+            target: d.target as string | undefined,
+          });
+          latestDeployment = normalize(deployments[0] as Record<string, unknown>);
+          if (history) deploymentHistory = deployments.map(normalize);
         }
       }
     } catch {
@@ -101,6 +106,7 @@ export async function GET(
       isLinked: vercelProjectInfo !== null,
       projectInfo: vercelProjectInfo,
       latestDeployment,
+      ...(history && { deploymentHistory }),
     });
   } catch (error) {
     console.error('Error checking Vercel status:', error);
