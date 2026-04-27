@@ -4,6 +4,7 @@ import { join } from 'path';
 import type { ProjectConfig, LogEntry } from './types';
 import { logger } from './logger';
 import { getProjectSettings } from './settings';
+import { addNotification } from './notifications';
 
 interface ProcessEntry {
   process: ChildProcess;
@@ -163,6 +164,14 @@ export function startProject(
       logger.error('projects', 'process:crashed', `${project.name} crashed`, {
         projectId: project.id,
         meta: { code, signal },
+      });
+      addNotification({
+        severity: 'error',
+        category: 'application',
+        title: `${project.name} crashed`,
+        message: `Process exited with code ${code ?? 'null'}, signal ${signal ?? 'none'}`,
+        projectId: project.id,
+        actionUrl: '/',
       });
 
       // Auto-restart if configured

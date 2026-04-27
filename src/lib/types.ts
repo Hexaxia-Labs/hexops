@@ -96,6 +96,25 @@ export interface GlobalSettings {
     defaultLockfileResolution: LockfileResolutionMode;
     scanInterval: '1h' | '6h' | '24h' | 'manual';
   };
+  notifications: {
+    enabled: boolean;
+    webhookUrl: string | null;
+    webhookOnCritical: boolean;
+    webhookOnCrash: boolean;
+  };
+}
+
+export interface Notification {
+  id: string;
+  timestamp: string;
+  severity: 'info' | 'warning' | 'error' | 'critical';
+  category: 'security' | 'system' | 'application' | 'git' | 'scheduler';
+  title: string;
+  message: string;
+  projectId?: string;
+  read: boolean;
+  actionUrl?: string;
+  meta?: Record<string, unknown>;
 }
 
 export interface ProjectSettings {

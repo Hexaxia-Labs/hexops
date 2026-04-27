@@ -26,6 +26,12 @@ const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
     defaultLockfileResolution: 'clean-slate',
     scanInterval: 'manual' as const,
   },
+  notifications: {
+    enabled: true,
+    webhookUrl: null,
+    webhookOnCritical: true,
+    webhookOnCrash: true,
+  },
 };
 
 // Default project settings
