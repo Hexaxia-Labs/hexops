@@ -11,6 +11,11 @@ interface ProcessEntry {
 }
 const activeProcesses = new Map<string, ProcessEntry>();
 const stoppingProjects = new Set<string>();
+const restartCounts = new Map<string, number>();
+const restartTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+const MAX_RESTARTS = 5;
+const RESTART_BACKOFF_MS = [1000, 2000, 4000, 8000, 16000];
 
 // Log directory path
 const LOGS_DIR = join(process.cwd(), '.hexops', 'logs');
@@ -142,19 +147,50 @@ export function startProject(
       stoppingProjects.delete(project.id);
       activeProcesses.delete(project.id);
 
-      if (intentional || code === 0) {
+      const isCrash = !intentional && code !== 0;
+
+      if (!isCrash) {
         addLogEntry(project.id, 'stdout', `[SYS] Process stopped (code ${code ?? signal})`);
         logger.info('projects', 'process:stopped', `${project.name} stopped`, {
           projectId: project.id,
           meta: { code, signal, intentional },
         });
-      } else {
-        addLogEntry(project.id, 'stderr', `[SYS] Process crashed — exit code ${code ?? 'null'}, signal ${signal ?? 'none'}`);
-        logger.error('projects', 'process:crashed', `${project.name} crashed`, {
-          projectId: project.id,
-          meta: { code, signal },
-        });
+        restartCounts.delete(project.id);
+        return;
       }
+
+      addLogEntry(project.id, 'stderr', `[SYS] Process crashed — exit code ${code ?? 'null'}, signal ${signal ?? 'none'}`);
+      logger.error('projects', 'process:crashed', `${project.name} crashed`, {
+        projectId: project.id,
+        meta: { code, signal },
+      });
+
+      // Auto-restart if configured
+      const crashSettings = getProjectSettings(project.id);
+      if (!crashSettings.monitoring.restartOnCrash) return;
+
+      const attempts = (restartCounts.get(project.id) ?? 0) + 1;
+      restartCounts.set(project.id, attempts);
+
+      if (attempts > MAX_RESTARTS) {
+        addLogEntry(project.id, 'stderr', `[SYS] Max restarts (${MAX_RESTARTS}) reached — giving up`);
+        logger.error('projects', 'process:restart_limit', `${project.name} exceeded restart limit`, { projectId: project.id });
+        restartCounts.delete(project.id);
+        return;
+      }
+
+      const delay = RESTART_BACKOFF_MS[attempts - 1] ?? RESTART_BACKOFF_MS[RESTART_BACKOFF_MS.length - 1];
+      addLogEntry(project.id, 'stdout', `[SYS] Restarting in ${delay / 1000}s (attempt ${attempts}/${MAX_RESTARTS})`);
+      logger.info('projects', 'process:restarting', `${project.name} restarting`, {
+        projectId: project.id,
+        meta: { attempt: attempts, delayMs: delay },
+      });
+
+      const timer = setTimeout(() => {
+        restartTimers.delete(project.id);
+        startProject(project, mode);
+      }, delay);
+      restartTimers.set(project.id, timer);
     });
 
     child.on('error', (error) => {
@@ -174,6 +210,11 @@ export function startProject(
 }
 
 export function stopProject(projectId: string, port: number): { success: boolean; error?: string } {
+  // Cancel any pending restart timer
+  const timer = restartTimers.get(projectId);
+  if (timer) { clearTimeout(timer); restartTimers.delete(projectId); }
+  restartCounts.delete(projectId);
+
   // First try to kill the tracked process
   stoppingProjects.add(projectId);
   const entry = activeProcesses.get(projectId);
