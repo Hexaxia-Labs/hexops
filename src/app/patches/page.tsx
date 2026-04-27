@@ -120,11 +120,75 @@ export default function PatchesPage() {
   const [dependabotMap, setDependabotMap] = useState<Record<string, boolean>>({});
   const [escalateItem, setEscalateItem] = useState<PatchQueueItem | null>(null);
   const [escalateModalOpen, setEscalateModalOpen] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const [validationResult, setValidationResult] = useState<{ passed: boolean; output: string; projectId: string } | null>(null);
+  const [validationPhase, setValidationPhase] = useState<string | null>(null);
 
   const handleEscalate = useCallback((item: PatchQueueItem) => {
     setEscalateItem(item);
     setEscalateModalOpen(true);
   }, []);
+
+  const handleValidate = useCallback(async () => {
+    if (!data || selectedPackages.size === 0) return;
+    const selectedItems = (data.queue ?? []).filter((item) => selectedPackages.has(getItemKey(item)));
+    if (selectedItems.length === 0) return;
+
+    // Pick the first project — validation is per-project
+    const projectId = selectedItems[0].projectId;
+    const packages = selectedItems
+      .filter((i) => i.projectId === projectId && i.targetVersion)
+      .map((i) => ({ name: i.package, fromVersion: i.currentVersion, toVersion: i.targetVersion! }));
+
+    if (packages.length === 0) return;
+
+    setValidating(true);
+    setValidationResult(null);
+    setValidationPhase('starting');
+
+    try {
+      const res = await fetch(`/api/projects/${projectId}/validate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packages }),
+      });
+
+      if (!res.body) throw new Error('No response body');
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split('\n\n');
+        buffer = events.pop() ?? '';
+        for (const block of events) {
+          const lines = block.split('\n');
+          const eventLine = lines.find((l) => l.startsWith('event: '));
+          const dataLine = lines.find((l) => l.startsWith('data: '));
+          if (!eventLine || !dataLine) continue;
+          const eventType = eventLine.slice(7);
+          const payload = JSON.parse(dataLine.slice(6));
+          if (eventType === 'progress') {
+            setValidationPhase(payload.message ?? payload.phase);
+          } else if (eventType === 'complete') {
+            setValidationResult({ passed: payload.buildPassed, output: payload.buildOutput, projectId });
+            setValidationPhase(null);
+          } else if (eventType === 'error') {
+            setValidationResult({ passed: false, output: payload.message ?? 'Unknown error', projectId });
+            setValidationPhase(null);
+          }
+        }
+      }
+    } catch (err) {
+      toast.error('Validation failed', { description: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setValidating(false);
+      setValidationPhase(null);
+    }
+  }, [data, selectedPackages]);
 
   const fetchPatches = useCallback((bustCache = false) => {
     // Close any existing connection
@@ -1064,6 +1128,17 @@ export default function PatchesPage() {
                 Clear
               </Button>
               <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs border-zinc-600 text-zinc-300 hover:bg-zinc-800"
+                onClick={handleValidate}
+                disabled={validating || updating}
+                title="Run build validation in a worktree before applying"
+              >
+                <Wrench className={cn('h-3 w-3 mr-1', validating && 'animate-spin')} />
+                {validating ? (validationPhase ?? 'Validating…') : 'Validate'}
+              </Button>
+              <Button
                 size="sm"
                 className="h-7 text-xs bg-purple-600 hover:bg-purple-700"
                 onClick={handleUpdateSelected}
@@ -1084,6 +1159,38 @@ export default function PatchesPage() {
             </Button>
           ) : null}
         </div>
+
+        {/* Validation result banner */}
+        {validationResult && (
+          <div className={cn(
+            'mx-6 mt-4 rounded-lg border px-4 py-3',
+            validationResult.passed
+              ? 'border-green-500/20 bg-green-500/5'
+              : 'border-red-500/20 bg-red-500/5'
+          )}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className={validationResult.passed ? 'text-green-400' : 'text-red-400'}>
+                  {validationResult.passed ? '✓' : '✗'}
+                </span>
+                <span className={cn('text-sm font-medium', validationResult.passed ? 'text-green-300' : 'text-red-300')}>
+                  Build validation {validationResult.passed ? 'passed' : 'failed'}
+                </span>
+              </div>
+              <button
+                onClick={() => setValidationResult(null)}
+                className="text-zinc-500 hover:text-zinc-300 text-xs"
+              >
+                dismiss
+              </button>
+            </div>
+            {!validationResult.passed && validationResult.output && (
+              <pre className="mt-2 text-xs text-red-300/80 font-mono max-h-32 overflow-auto whitespace-pre-wrap">
+                {validationResult.output.slice(-1500)}
+              </pre>
+            )}
+          </div>
+        )}
 
         {/* Queue List */}
         <div className="flex-1 overflow-auto p-6">
