@@ -56,14 +56,26 @@ export function LogsSection({ projectId, isRunning }: LogsSectionProps) {
         <span className="text-xs text-zinc-500">
           {logs.length} log entries
         </span>
-        <Button
-          variant="ghost"
-          size="sm"
-          className={`text-xs h-7 ${autoScroll ? 'text-purple-400' : 'text-zinc-500'}`}
-          onClick={() => setAutoScroll(!autoScroll)}
-        >
-          {autoScroll ? 'Auto-scroll ON' : 'Auto-scroll OFF'}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-xs h-7 text-zinc-500 hover:text-zinc-300"
+            onClick={() => {
+              window.open(`/api/projects/${projectId}/logs?download=1&limit=5000`, '_blank');
+            }}
+          >
+            ↓ Download
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className={`text-xs h-7 ${autoScroll ? 'text-purple-400' : 'text-zinc-500'}`}
+            onClick={() => setAutoScroll(!autoScroll)}
+          >
+            {autoScroll ? 'Auto-scroll ON' : 'Auto-scroll OFF'}
+          </Button>
+        </div>
       </div>
 
       <div
