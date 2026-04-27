@@ -685,7 +685,9 @@ export async function POST(
                 if (existsSync(nmPath)) {
                   const installed = JSON.parse(readFileSync(nmPath, 'utf-8')).version;
                   const isFloating = /^(latest|next|canary)$/.test(pkg.targetVersion);
-                  success = isFloating ? installed !== pkg.fromVersion : installed === pkg.targetVersion;
+                  // For floating targets (latest/next/canary) the package may already be at the
+                  // current latest — version unchanged is expected and correct, not a failure.
+                  success = isFloating ? !!installed : installed === pkg.targetVersion;
                 }
               } catch { /* can't verify — stay false */ }
 
