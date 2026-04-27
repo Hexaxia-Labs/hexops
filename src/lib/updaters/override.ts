@@ -79,7 +79,10 @@ export function cleanStaleOverrides(
     const staleKeys: string[] = [];
     for (const [overridePkg, pinnedVersion] of Object.entries(overridesObj)) {
       try {
-        const nmPath = join(cwd, 'node_modules', overridePkg, 'package.json');
+        // pnpm allows keys like "pkg@>=range" or "@scope/pkg@>=range" — strip specifier for lookup
+        const atIdx = overridePkg.indexOf('@', 1); // skip leading @ for scoped packages
+        const lookupPkg = atIdx !== -1 ? overridePkg.slice(0, atIdx) : overridePkg;
+        const nmPath = join(cwd, 'node_modules', lookupPkg, 'package.json');
         if (existsSync(nmPath)) {
           const installed = JSON.parse(readFileSync(nmPath, 'utf-8')).version;
           if (installed && pinnedVersion && !/^[<>=^~]/.test(pinnedVersion)) {

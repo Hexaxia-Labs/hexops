@@ -224,10 +224,11 @@ export async function POST(
       cleanStaleOverrides(cwd, packageManager, id);
     }
 
-    // Post-patch audit verification
+    // Post-patch audit verification — check ALL attempted packages, not just ones verifyInstalled
+    // reported as success, because reconcile can alter installed versions after our checks.
     if (anySucceeded && packages.length > 0) {
-      const successfullyPatched = results.filter(r => r.success).map(r => r.package).filter(n => n !== '*');
-      const stillVulnerable = await verifyAuditClear(cwd, packageManager, successfullyPatched);
+      const allAttempted = results.map(r => r.package).filter(n => n !== '*');
+      const stillVulnerable = await verifyAuditClear(cwd, packageManager, allAttempted);
       for (const name of stillVulnerable) {
         const idx = results.findIndex(r => r.package === name);
         if (idx !== -1) {

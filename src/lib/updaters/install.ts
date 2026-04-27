@@ -55,12 +55,9 @@ export async function installPackages(
     batchStdout = err.stdout || '';
     batchStderr = err.stderr || '';
 
-    const looksInstalled =
-      batchStdout.includes('added') ||
-      batchStdout.includes('changed') ||
-      batchStdout.includes('up to date');
-
-    if (looksInstalled) {
+    // Verify via actual node_modules reads rather than output string heuristics
+    const anyVerified = directPkgs.some(p => verifyInstalled(cwd, p));
+    if (anyVerified) {
       batchSuccess = true;
     } else if (packageManager === 'npm' && isArboristError(batchStderr, err.message)) {
       logger.warn('patches', 'arborist_error', `Arborist error on batch install, attempting clean reinstall`, {
@@ -173,9 +170,19 @@ export async function installPackages(
     const installCmd = buildSingleCmd(packageManager, `${pkg.name}@${pkg.targetVersion}`, isWorkspace);
     try {
       const result = await execAsync(installCmd, { cwd, timeout: NPM_INSTALL_TIMEOUT });
-      const output = `$ ${installCmd}\n${result.stdout || ''}${result.stderr || ''}`;
-      results.push({ package: pkg.name, success: true, output });
-      logger.info('patches', 'package_updated', `Updated ${pkg.name} to ${pkg.targetVersion}`, {
+      const combinedOutput = (result.stdout || '') + (result.stderr || '');
+      const output = `$ ${installCmd}\n${combinedOutput}`;
+      // pnpm can exit 0 while printing ERR_PNPM_* — verify via node_modules
+      const pnpmSoftFail = packageManager === 'pnpm' && combinedOutput.includes('ERR_PNPM_');
+      const success = pnpmSoftFail ? verifyInstalled(cwd, pkg) : true;
+      results.push({ package: pkg.name, success, output, error: success ? undefined : 'pnpm reported error despite exit 0' });
+      if (!success) {
+        logger.warn('patches', 'pnpm_soft_failure', `pnpm exited 0 but ${pkg.name} not installed correctly`, {
+          projectId,
+          meta: { package: pkg.name },
+        });
+      }
+      if (success) logger.info('patches', 'package_updated', `Updated ${pkg.name} to ${pkg.targetVersion}`, {
         projectId,
         meta: { package: pkg.name, fromVersion: pkg.fromVersion || 'unknown', toVersion: pkg.targetVersion, packageManager },
       });
@@ -188,7 +195,7 @@ export async function installPackages(
         toVersion: pkg.targetVersion,
         updateType: pkg.fromVersion ? getUpdateType(pkg.fromVersion, pkg.targetVersion) : 'patch',
         trigger: 'manual',
-        success: true,
+        success,
         output,
       });
     } catch (err) {
