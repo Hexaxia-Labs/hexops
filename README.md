@@ -5,7 +5,7 @@
 Manage 5, 15, or 50+ local dev projects from a single web interface. Start/stop servers, batch-patch vulnerabilities, monitor system health, and deploy to Vercel without touching a terminal.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-0.10.2-green.svg)
+![Version](https://img.shields.io/badge/version-0.13.0-green.svg)
 ![Node](https://img.shields.io/badge/node-20%2B-brightgreen.svg)
 ![Next.js](https://img.shields.io/badge/Next.js-16-black.svg)
 
@@ -20,6 +20,47 @@ You have 15 local projects. A critical CVE drops. Now you need to:
 3. Miss one. Find out the hard way.
 
 Or you could open HexOps and patch all 15 in 5 minutes.
+
+---
+
+## What It Does
+
+| Feature | What You Get |
+|---------|-------------|
+| **Project Dashboard** | See all projects in one view. Start/stop dev servers. View git branch, port, uptime, memory. Autostart flagged projects on boot. |
+| **Patch Scanner** | Scan every project for vulnerabilities and outdated packages. Batch update with one click. Post-patch audit verifies advisories are actually gone. |
+| **Override-Aware Patching** | Automatically detects transitive deps, applies `pnpm.overrides` / `npm overrides`, cleans stale overrides after direct dep updates. |
+| **Escalate / Triage Mode** | When a patch can't land cleanly: force-override, force-major bump, or accept-risk with expiry. Downgrade guards on all paths. |
+| **Package Holds** | Skip packages that break things (per-project). ESLint major upgrade? Hold it until you're ready. |
+| **Cross-Project Integrity** | After any patch, checks all other projects for collateral downgrades of the same package. Fires a notification if found. |
+| **Dependency Graph** | Visualize shared packages across all projects. Bar chart of top 20 most-shared packages, color-coded by vulnerability status. |
+| **Code Security Scanner** | 16 grep-based PCRE rules — hardcoded secrets, dangerous APIs, command injection, weak crypto, misconfigurations. Supports `.hexops-ignore`. |
+| **Supply Chain Scanner** | Detects install scripts, invalid npm signatures, and typosquatted package names via Levenshtein distance. |
+| **Notifications** | In-app notification bell for security events, crashes, and patch results. Optional webhook for critical alerts. |
+| **Scheduler** | Configurable background tasks: auto patch-scan and health-check on cron-style intervals. |
+| **Integrated Shell** | Full PTY terminal in the browser via xterm.js. No more "which tab was that?" |
+| **System Health** | Real-time CPU, memory, disk gauges with color-coded thresholds. |
+| **Git Controls** | View status, commit, push, pull, branch switch, and stash management from the UI. Auto-commit after patches. |
+| **Vercel Deploy** | Deploy preview or production builds directly from the dashboard. Streaming build logs. Deployment history. |
+| **Dependabot Integration** | Monitor mode for Dependabot-managed repos. Branch propagation syncs `package.json` and regenerates lockfiles after merges. |
+| **MCP Server** | 16 tools exposing HexOps APIs to Claude Code and any MCP-compatible client. Register with `claude mcp add hexops`. |
+| **Centralized Logs** | JSON Lines format. Filter by level, category, project. Live mode with auto-refresh. |
+| **Per-Project Settings** | Environment vars, Node version overrides, shell selection, deploy config, monitoring. |
+
+---
+
+## Real Numbers
+
+We use HexOps daily to manage 27 projects across 4 categories:
+
+| Metric | Value |
+|--------|-------|
+| Projects managed | 27 |
+| Categories | Client, Internal, Personal, Product |
+| Packages scanned per run | 97+ outdated across 22 projects |
+| Time to patch all projects | ~5 minutes (vs ~2 hours manually) |
+| GitHub issues resolved | 87 (all closed) |
+| Patch edge cases handled | npm ERESOLVE, pnpm soft-failures, arborist errors, lockfile corruption, transitive dep overrides, collateral downgrades |
 
 ---
 
@@ -42,38 +83,6 @@ Every operation logged with timestamps, levels, and categories. Filter by projec
 
 ---
 
-## What It Does
-
-| Feature | What You Get |
-|---------|-------------|
-| **Project Dashboard** | See all projects in one view. Start/stop dev servers. View git branch, port, uptime, memory. |
-| **Patch Scanner** | Scan every project for vulnerabilities and outdated packages. Batch update with one click. |
-| **Package Holds** | Skip packages that break things (per-project). ESLint major upgrade? Hold it until you're ready. |
-| **Integrated Shell** | Full PTY terminal in the browser via xterm.js. No more "which tab was that?" |
-| **System Health** | Real-time CPU, memory, disk gauges with color-coded thresholds. |
-| **Git Controls** | View status, commit, push, pull from the UI. Auto-commit after patches with editable messages. |
-| **Vercel Deploy** | Deploy preview or production builds directly from the dashboard. |
-| **Centralized Logs** | JSON Lines format. Filter by level, category, project. Live mode with auto-refresh. |
-| **Per-Project Settings** | Environment vars, Node version overrides, shell selection, deploy config, monitoring. |
-
----
-
-## Real Numbers
-
-We use HexOps daily to manage 27 projects across 4 categories:
-
-| Metric | Value |
-|--------|-------|
-| Projects managed | 27 |
-| Categories | Client, Internal, Personal, Product |
-| Packages scanned per run | 97 outdated across 22 projects |
-| Time to patch all projects | ~5 minutes (vs ~2 hours manually) |
-| Bug fixes for npm/pnpm edge cases | 7 (and counting) |
-
-The patch scanner handles real-world messiness that other tools don't: npm v7+ audit format differences, pnpm transitive dependency detection, lockfile corruption, `ERESOLVE` peer dep conflicts with automatic `--legacy-peer-deps` retry, and post-install version verification.
-
----
-
 ## How It Compares
 
 | | HexOps | pm2 | Portainer | Renovate/Dependabot | Manual Terminals |
@@ -82,11 +91,16 @@ The patch scanner handles real-world messiness that other tools don't: npm v7+ a
 | Multi-repo management | Yes | Limited | Docker only | Yes (CI) | Manual |
 | Vulnerability scanning | Yes | No | No | Yes | Manual |
 | Batch patching | Yes | No | No | PR-based | Manual |
+| Override-aware patching | Yes | No | No | Limited | No |
+| Post-patch audit verify | Yes | No | No | No | Manual |
+| Supply chain scanning | Yes | No | No | No | No |
+| Code security scanning | Yes | No | No | No | No |
 | Package holds | Yes | No | No | No | N/A |
 | Integrated terminal | Yes | No | Yes | No | N/A |
 | System health monitoring | Yes | Yes | Yes | No | Manual |
 | Git integration | Yes | No | No | Yes | Manual |
 | Vercel deploy | Yes | No | No | No | CLI |
+| MCP server | Yes | No | No | No | No |
 | No containers required | Yes | Yes | No | Yes | Yes |
 | Local-first (no CI needed) | Yes | Yes | No | No | Yes |
 
@@ -132,6 +146,20 @@ Open [http://localhost:3000](http://localhost:3000).
 
 Add as many projects as you want. HexOps scans them all.
 
+### MCP Server (Claude Code)
+
+Expose HexOps as MCP tools to Claude Code and other AI clients:
+
+```bash
+# Register with Claude Code (HexOps must be running)
+claude mcp add hexops -- npx tsx src/mcp/server.ts
+
+# Or with a custom URL
+HEXOPS_URL=http://localhost:3001 claude mcp add hexops -- npx tsx src/mcp/server.ts
+```
+
+Available tools: `list_projects`, `start_project`, `stop_project`, `scan_patches`, `apply_patches`, `get_vulnerabilities`, `git_status`, `git_commit`, `git_push`, `get_logs`, and more.
+
 ---
 
 ## Tech Stack
@@ -139,7 +167,8 @@ Add as many projects as you want. HexOps scans them all.
 - **Next.js 16** (App Router) + **React 19**
 - **Tailwind CSS v4** + **shadcn/ui** + **Radix UI**
 - **xterm.js** + **node-pty** (WebSocket-driven PTY shell)
-- **Recharts** (system health gauges)
+- **Recharts** (data visualization)
+- **@modelcontextprotocol/sdk** (MCP server)
 - **Custom server** (WebSocket for shell + HMR co-existence)
 
 ## Requirements
@@ -171,11 +200,25 @@ HexOps provides full shell access and process control. These are powerful featur
 
 ## Roadmap
 
-- [ ] MCP server for Claude Code integration (#45)
-- [ ] Pre-patch build validation (#29)
-- [ ] Static security scanner (#46)
-- [ ] Supply chain detection (#47)
-- [ ] Scheduled operations (auto-scan, auto-patch)
+### Completed (v0.13.0)
+- [x] MCP server for Claude Code integration — 16 tools, stdio transport
+- [x] Static code security scanner — 16 grep-based PCRE rules
+- [x] Supply chain scanner — install scripts, signatures, typosquats
+- [x] Post-patch audit verification — confirms advisory actually cleared
+- [x] Cross-project collateral downgrade detection
+- [x] Override-aware patching with stale override cleanup
+- [x] Escalate / triage mode — force-override, force-major, accept-risk
+- [x] Dependabot integration and branch propagation
+- [x] Dependency graph visualization
+- [x] Notifications system with webhook support
+- [x] Background task scheduler
+- [x] Vercel deployment history and streaming build logs
+- [x] Branch switcher and stash management in git UI
+- [x] Patch trends dashboard
+
+### Planned
+- [ ] Pre-patch build validation in isolated worktree
+- [ ] HexOps Agent — dashboard chat UI (Phase 2 of MCP)
 - [ ] Multi-user mode with auth
 - [ ] Docker image for instant setup
 

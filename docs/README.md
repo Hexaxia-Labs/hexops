@@ -13,7 +13,9 @@ Detailed documentation for each feature:
 
 - [Dashboard](features/dashboard.md) - Main overview and system health
 - [Projects](features/projects.md) - Project management and controls
-- [Patches](features/patches.md) - Package updates and vulnerability scanning
+- [Patches](features/patches.md) - Package updates, vulnerability scanning, overrides, escalation
+- [Security](features/security.md) - Code security scanner and supply chain scanner
+- [MCP Server](features/mcp-server.md) - Claude Code and AI client integration
 - [Terminal](features/terminal.md) - Integrated shell
 - [Settings](features/settings.md) - Global and project settings
 - [Deployments](features/deployments.md) - Vercel integration
