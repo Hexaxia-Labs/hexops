@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { useShell } from '@/components/providers';
 import { toast } from 'sonner';
 import { ProjectList } from '@/components/project-list';
 import { ProjectDetail } from '@/components/project-detail';
@@ -25,6 +26,7 @@ type ViewMode = 'list' | 'detail';
 
 function HomeContent() {
   const searchParams = useSearchParams();
+  const { openShell } = useShell();
   const [projects, setProjects] = useState<Project[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
@@ -397,6 +399,7 @@ function HomeContent() {
             onClearCache={handleClearCache}
             onDeleteLock={handleDeleteLock}
             onRefresh={fetchProjects}
+            onOpenShell={openShell}
             categories={categories}
           />
         ) : (

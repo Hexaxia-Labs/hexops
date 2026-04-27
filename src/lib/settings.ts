@@ -24,6 +24,7 @@ const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   },
   patching: {
     defaultLockfileResolution: 'clean-slate',
+    scanInterval: 'manual' as const,
   },
 };
 
