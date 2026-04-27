@@ -138,7 +138,7 @@ export function getLogStats(): LogStats {
   const stats: LogStats = {
     totalEntries: 0,
     byLevel: { debug: 0, info: 0, warn: 0, error: 0 },
-    byCategory: { patches: 0, projects: 0, git: 0, api: 0, system: 0 },
+    byCategory: { patches: 0, projects: 0, git: 0, api: 0, system: 0, scheduler: 0 },
     totalSizeBytes: 0,
   };
 

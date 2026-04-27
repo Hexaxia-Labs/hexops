@@ -5,7 +5,7 @@ import { join } from 'path';
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 // Log categories
-export type LogCategory = 'patches' | 'projects' | 'git' | 'api' | 'system';
+export type LogCategory = 'patches' | 'projects' | 'git' | 'api' | 'system' | 'scheduler';
 
 // Log entry structure
 export interface LogEntry {

@@ -32,6 +32,24 @@ const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
     webhookOnCritical: true,
     webhookOnCrash: true,
   },
+  scheduler: {
+    tasks: [
+      {
+        id: 'patch-scan',
+        name: 'Patch scan',
+        action: 'patch-scan' as const,
+        interval: '24h' as const,
+        enabled: false,
+      },
+      {
+        id: 'health-check',
+        name: 'Health check',
+        action: 'health-check' as const,
+        interval: '15m' as const,
+        enabled: false,
+      },
+    ],
+  },
 };
 
 // Default project settings

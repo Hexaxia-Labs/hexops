@@ -102,6 +102,23 @@ export interface GlobalSettings {
     webhookOnCritical: boolean;
     webhookOnCrash: boolean;
   };
+  scheduler: {
+    tasks: SchedulerTask[];
+  };
+}
+
+export type SchedulerAction = 'patch-scan' | 'health-check';
+
+export interface SchedulerTask {
+  id: string;
+  name: string;
+  action: SchedulerAction;
+  interval: '15m' | '1h' | '6h' | '24h';
+  enabled: boolean;
+  lastRun?: string;
+  lastStatus?: 'success' | 'failure';
+  lastOutput?: string;
+  nextRun?: string;
 }
 
 export interface Notification {

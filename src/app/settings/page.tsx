@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
-import { ChevronDown, ChevronRight, FolderOpen, GitBranch, Cloud, Wrench, Eye, EyeOff, Check, X, Loader2, Save } from 'lucide-react';
+import { ChevronDown, ChevronRight, FolderOpen, GitBranch, Cloud, Wrench, Eye, EyeOff, Check, X, Loader2, Save, Clock, Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import type { GlobalSettings } from '@/lib/types';
+import type { GlobalSettings, SchedulerTask } from '@/lib/types';
 
 // Collapsible section wrapper
 interface CollapsibleSectionProps {
@@ -117,6 +117,65 @@ function Toggle({ label, description, checked, onChange }: ToggleProps) {
         />
       </button>
     </div>
+  );
+}
+
+function SchedulerSection() {
+  const [tasks, setTasks] = useState<SchedulerTask[]>([]);
+  const [triggering, setTriggering] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch('/api/scheduler');
+      if (res.ok) { const d = await res.json(); setTasks(d.tasks ?? []); }
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const toggle = async (taskId: string) => {
+    await fetch('/api/scheduler', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'toggle', taskId }) });
+    load();
+  };
+
+  const trigger = async (taskId: string) => {
+    setTriggering(taskId);
+    await fetch('/api/scheduler', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'trigger', taskId }) });
+    setTriggering(null);
+    load();
+  };
+
+  return (
+    <CollapsibleSection title="Scheduler" icon={<Clock className="h-4 w-4 text-zinc-500" />}>
+      <div className="space-y-2">
+        {tasks.map(task => (
+          <div key={task.id} className="flex items-center gap-3 bg-zinc-900 rounded-lg px-3 py-2.5">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm text-zinc-200">{task.name}</p>
+              <div className="flex items-center gap-3 mt-0.5 text-xs text-zinc-500">
+                <span>Every {task.interval}</span>
+                {task.lastRun && <span>Last: {new Date(task.lastRun).toLocaleString()}</span>}
+                {task.lastStatus && (
+                  <span className={task.lastStatus === 'success' ? 'text-green-400' : 'text-red-400'}>
+                    {task.lastStatus}
+                  </span>
+                )}
+              </div>
+            </div>
+            <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-zinc-500" title="Run now" disabled={triggering === task.id} onClick={() => trigger(task.id)}>
+              {triggering === task.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+            </Button>
+            <button
+              onClick={() => toggle(task.id)}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${task.enabled ? 'bg-purple-600' : 'bg-zinc-700'}`}
+            >
+              <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${task.enabled ? 'translate-x-4' : 'translate-x-1'}`} />
+            </button>
+          </div>
+        ))}
+        {tasks.length === 0 && <p className="text-xs text-zinc-600">No scheduled tasks configured.</p>}
+      </div>
+    </CollapsibleSection>
   );
 }
 
@@ -465,6 +524,9 @@ export default function SettingsPage() {
             </div>
           </div>
         </CollapsibleSection>
+
+        {/* Scheduler */}
+        <SchedulerSection />
 
         {/* Patching */}
         <CollapsibleSection
