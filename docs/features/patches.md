@@ -7,29 +7,28 @@ The Patches page provides centralized management of package updates and security
 Access the Patches page from the sidebar or navigate to `/patches`.
 
 The page scans all configured projects for:
-- **Outdated Packages** - Using `pnpm outdated`
-- **Security Vulnerabilities** - Using `pnpm audit`
+- **Security Vulnerabilities** — via `npm audit` / `pnpm audit` / `yarn audit`
+- **Outdated Packages** — via `npm outdated` / `pnpm outdated` / `yarn outdated`
 
-## View Modes
+---
 
-### Flat View
+## Filter Bar
 
-Shows all patches in a single list, sorted by priority:
+### Row 1 — Type & View
+| Control | Options |
+|---------|---------|
+| **Type** | All · Vulns · Outdated |
+| **View** | Flat list · Grouped by project |
 
-1. Critical security vulnerabilities
-2. High security vulnerabilities
-3. Moderate security issues
-4. Major version updates
-5. Minor version updates
-6. Patch version updates
+### Row 2 — Badges & Actions
+| Element | Meaning |
+|---------|---------|
+| `N overrides` | Transitive deps that will be fixed via PM override block |
+| `N breaking` | Updates that require a semver-major version change |
+| `On Hold (N)` | Toggle to show/hide held packages |
+| **Select All / Update Selected** | Appear when items are selected |
 
-### Grouped View (Default)
-
-Groups patches by project, showing:
-- Project name and patch count
-- Expandable sections per project
-- Per-project git controls
-- Batch actions per project
+---
 
 ## Patch Information
 
@@ -41,145 +40,114 @@ Each patch row shows:
 | Package Name | npm package name |
 | Current | Currently installed version |
 | Latest | Latest available version |
-| Type | major/minor/patch/security |
-| Severity | For vulnerabilities: critical/high/moderate/low |
+| Type | major / minor / patch / security |
+| Severity | For vulnerabilities: critical / high / moderate / low |
 
-### Details Panel
-
-Click the info icon on any patch to see:
-
-- Package type (dependency/devDependency)
-- Full version information
-- Vulnerability details (if applicable)
-- CVE identifiers with links
-- Advisory links
-
-## Selecting Patches
-
-### Individual Selection
-
-Click the checkbox next to any patch to select it.
-
-### Select All
-
-In grouped view, each project has a "Select All" checkbox that:
-- Selects all non-held packages in that project
-- Excludes packages on hold
+---
 
 ## Updating Packages
 
 ### Batch Update
+1. Select packages with checkboxes (or **Select All**)
+2. Click **Update Selected**
+3. HexOps applies patches per project, shows progress
+4. After completion: a **post-patch audit banner** confirms which advisories cleared and how many vulnerabilities remain
 
-1. Select patches to update
-2. Click "Update Selected" in the right sidebar
-3. Watch progress in real-time
-4. Review results
+### Post-Patch Audit Verification
+After every update, HexOps re-runs `audit --json` on the affected packages to confirm advisories are actually gone — not just that the top-level version changed. A nested transitive copy can survive an override and still be vulnerable. The banner reports:
+- ✓ All advisories cleared
+- ⚠ N vulns still remain: `pkg-a`, `pkg-b`…
 
-### Update Progress
+If an advisory survives, the package is marked as failed and the error message suggests escalation.
 
-The right sidebar shows:
-- Currently updating package
-- Success/failure status
-- Error messages if any
+---
+
+## Override-Aware Patching
+
+When a vulnerable package is a **transitive dependency** (not in your `package.json`), HexOps:
+1. Injects an entry into `pnpm.overrides` / `npm overrides` / `yarn resolutions`
+2. Runs install to force the pinned version
+3. Verifies the override landed in `node_modules`
+4. Cleans stale overrides after a direct dep update supersedes them
+
+### Active Overrides Panel
+The Patches page shows all currently active overrides with package name, pinned version, and reason. Remove any override from this panel.
+
+---
+
+## Escalate / Triage Mode
+
+When a standard patch fails (peer dep conflict, breaking change, unfixable transitive), use the **Escalate** action to choose a resolution strategy:
+
+| Action | What Happens |
+|--------|-------------|
+| `force_override` | Writes a PM override and commits it. Downgrade guard prevents pinning an older version than what's installed. |
+| `force_major` | Updates the direct dependency to a major version bump. Requires manual review — does NOT auto-commit. |
+| `accepted_risk` | Records an acknowledged risk with optional expiry date (max configurable days). Package stays held. |
+
+All escalation records are stored and visible in the escalation history.
+
+---
 
 ## Package Holds
 
-Some packages may cause issues when updated. Use holds to skip them:
+Hold a package to exclude it from all automatic and batch updates:
+- Per-project, per-package
+- Held packages appear greyed out in the queue
+- Toggle **On Hold** in the filter bar to show/hide them
+- Remove a hold from the package row or the Holds section in Project Settings
 
-### Adding a Hold
+---
 
-1. Click the pause icon on any patch row
-2. Package is added to project's hold list
-3. Appears dimmed in the UI
+## Cross-Project Integrity Check
 
-### Removing a Hold
+After any patch, HexOps scans all other projects that share the same package and checks whether any have it installed at a version **older** than the target. If detected:
+- A warning is logged to the activity log
+- A notification is fired: "Possible collateral downgrade detected"
+- Affected project names are listed
 
-1. Click the play icon on a held package
-2. Package is removed from hold list
-3. Can be updated normally
+This catches incidents where stale advisory data or npm registry glitches downgrade a package across multiple projects simultaneously.
 
-### Hold Behavior
+---
 
-Held packages:
-- Appear dimmed in the list
-- Are excluded from "Select All"
-- Cannot be selected for update
-- Persist in config file
+## Patch Trends
 
-## Git Integration
+Navigate to `/patches/trends` (or click **Trends** in the Patches header) for:
+- 26-week rolling chart of patch volume (success vs failure)
+- KPI cards: total patches, success rate, average per week
+- Per-project breakdown sorted by patch volume
 
-After updating packages, the grouped view shows git controls:
+---
 
-### Commit
+## Scan Controls
 
-When uncommitted changes exist:
-1. Click "Commit" on the project card
-2. Auto-generated commit message appears
-3. Edit message if needed
-4. Confirm to commit
+| Button | Action |
+|--------|--------|
+| **Scan All** | Streams scan progress via SSE, updates the queue in real time |
+| **Refresh** | Reload from cache without re-scanning |
+| **Export CSV** | Download patch history as CSV |
+| **Trends** | Navigate to the trends dashboard |
 
-### Push
+Cache TTL is 1 hour with up to 15 minutes of jitter to prevent thundering herd across many projects.
 
-When local commits exist:
-1. Shows count of commits ahead
-2. Click "Push" to push to remote
-3. Requires git credentials configured
+---
 
-## Filtering
+## .hexops-ignore
 
-### Category Filter
+Create a `.hexops-ignore` file in any project root to suppress specific scanner rules:
 
-Filter by project category in the left sidebar.
+```
+# Suppress specific scan rules (one rule ID per line)
+hardcoded-api-key
+debug-true
+```
 
-### Type Filter
+---
 
-Show only certain patch types:
-- Security Only
-- Major Updates
-- Minor/Patch
+## Supported Package Managers
 
-### Show Held
-
-Toggle to show or hide held packages.
-
-### Show Unfixable
-
-Toggle to show vulnerabilities that cannot be directly fixed (transitive dependencies).
-
-## Scanning
-
-### Automatic Scan
-
-Projects are scanned automatically with results cached for 1 hour (with random jitter to prevent thundering herd).
-
-### Progressive Loading
-
-When caches are cold, the patches page shows a real-time progress bar as each project is scanned via Server-Sent Events (SSE). Projects with warm caches load instantly.
-
-### Manual Rescan
-
-Click "Scan All" to force a fresh scan of all projects with live progress.
-
-## Transitive Vulnerabilities
-
-Vulnerabilities in transitive dependencies are handled automatically:
-
-- **Fix via parent**: If the parent direct dependency has a non-breaking update that resolves the vulnerability, HexOps updates the parent
-- **Fix via override**: If no parent update exists, HexOps applies a package manager override (`pnpm.overrides`, `npm.overrides`, or `yarn.resolutions`)
-- Dependency chain shown in the details panel (via field)
-
-## Pnpm Lockfile Handling
-
-HexOps automatically detects and repairs broken pnpm lockfiles before patching:
-
-- Cross-platform entries (e.g., `@next/swc-darwin-arm64` on Linux)
-- Corrupted merge conflict artifacts
-- Lockfile regenerated via `pnpm install --no-frozen-lockfile`
-
-## Post-Patch Verification
-
-After applying patches, HexOps verifies each package was actually installed:
-
-- Checks installed version in `node_modules` matches the target
-- Detects pnpm soft failures (exit 0 with `ERR_PNPM_*`)
-- Retroactively corrects false-success history entries on rescan
+| Manager | Audit | Outdated | Overrides | Lockfile Repair |
+|---------|-------|----------|-----------|-----------------|
+| pnpm | Yes | Yes | `pnpm.overrides` | Yes (`--no-frozen-lockfile`) |
+| npm | Yes | Yes | `overrides` | Yes (`--legacy-peer-deps`) |
+| yarn | Yes | Yes | `resolutions` | Partial |
