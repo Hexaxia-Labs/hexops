@@ -7,7 +7,12 @@ import { ProjectList } from '@/components/project-list';
 import { ProjectDetail } from '@/components/project-detail';
 import { SystemHealth } from '@/components/system-health';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Search, X } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import type { Project } from '@/lib/types';
+
+type SortBy = 'name' | 'status' | 'vulns';
 
 interface PatchStatus {
   patched: number;
@@ -22,7 +27,9 @@ function HomeContent() {
   const searchParams = useSearchParams();
   const [projects, setProjects] = useState<Project[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
-  const selectedCategory: string | null = null; // Category filtering disabled for now
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<SortBy>('name');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
@@ -234,13 +241,35 @@ function HomeContent() {
     setDetailProjectId(null);
   };
 
-  // Filter projects based on selected category
-  const filteredProjects = projects.filter((project) => {
-    if (selectedCategory === null) return true;
-    if (selectedCategory === 'running') return project.status === 'running';
-    if (selectedCategory === 'stopped') return project.status === 'stopped';
-    return project.category === selectedCategory;
-  });
+  const filteredProjects = projects
+    .filter((project) => {
+      if (selectedCategory !== null) {
+        if (selectedCategory === 'running' && project.status !== 'running') return false;
+        if (selectedCategory === 'stopped' && project.status !== 'stopped') return false;
+        if (selectedCategory !== 'running' && selectedCategory !== 'stopped' && project.category !== selectedCategory) return false;
+      }
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        return (
+          project.name.toLowerCase().includes(q) ||
+          (project.description ?? '').toLowerCase().includes(q) ||
+          project.category.toLowerCase().includes(q)
+        );
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      if (sortBy === 'status') {
+        const order = { running: 0, stopped: 1, unknown: 2 };
+        return (order[a.status] ?? 2) - (order[b.status] ?? 2);
+      }
+      if (sortBy === 'vulns') {
+        const va = (a.extended?.packages?.vulnerabilityCount ?? 0);
+        const vb = (b.extended?.packages?.vulnerabilityCount ?? 0);
+        return vb - va;
+      }
+      return a.name.localeCompare(b.name);
+    });
 
   // Get detail project - keep previous project data during refreshes to prevent
   // the detail view from unmounting/remounting while polling or during HMR
@@ -268,33 +297,76 @@ function HomeContent() {
       <main className="flex-1 flex flex-col overflow-hidden">
         {viewMode === 'list' ? (
           <>
-            <header className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
-              <div>
-                <h2 className="text-lg font-medium text-zinc-100">
-                  {selectedCategory === null
-                    ? 'All Projects'
-                    : selectedCategory === 'running'
-                    ? 'Running Projects'
-                    : selectedCategory === 'stopped'
-                    ? 'Stopped Projects'
-                    : selectedCategory}
-                </h2>
-                <p className="text-xs text-zinc-500">
-                  {filteredProjects.length} project{filteredProjects.length !== 1 ? 's' : ''}
-                </p>
+            <header className="border-b border-zinc-800 px-6 pt-4 pb-0">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h2 className="text-lg font-medium text-zinc-100">Projects</h2>
+                  <p className="text-xs text-zinc-500">
+                    {filteredProjects.length}/{projects.length} project{projects.length !== 1 ? 's' : ''}
+                    {searchQuery && <span className="ml-1 text-zinc-600">— filtered</span>}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500 pointer-events-none" />
+                    <Input
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search projects…"
+                      className="pl-8 pr-7 h-8 w-52 bg-zinc-800/50 border-zinc-700 text-sm text-zinc-200 placeholder:text-zinc-600 focus-visible:ring-zinc-600"
+                    />
+                    {searchQuery && (
+                      <button
+                        onClick={() => setSearchQuery('')}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value as SortBy)}
+                    className="h-8 px-2 text-xs bg-zinc-800 border border-zinc-700 text-zinc-300 rounded-md focus:outline-none"
+                  >
+                    <option value="name">Sort: Name</option>
+                    <option value="status">Sort: Status</option>
+                    <option value="vulns">Sort: Vulns</option>
+                  </select>
+                  <span className="text-xs text-zinc-600">
+                    {lastRefresh.toLocaleTimeString()}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-xs border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+                    onClick={fetchProjects}
+                  >
+                    Refresh
+                  </Button>
+                </div>
               </div>
-              <div className="flex items-center gap-4">
-                <span className="text-xs text-zinc-600">
-                  Last updated: {lastRefresh.toLocaleTimeString()}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-xs border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-                  onClick={fetchProjects}
-                >
-                  Refresh
-                </Button>
+
+              {/* Category filter tabs */}
+              <div className="flex items-center gap-1 overflow-x-auto pb-0 -mb-px">
+                {(['all', 'running', 'stopped', ...categories] as const).map((cat) => {
+                  const isAll = cat === 'all';
+                  const active = isAll ? selectedCategory === null : selectedCategory === cat;
+                  return (
+                    <button
+                      key={cat}
+                      onClick={() => setSelectedCategory(isAll ? null : cat)}
+                      className={cn(
+                        'shrink-0 px-3 py-2 text-xs font-medium border-b-2 transition-colors capitalize',
+                        active
+                          ? 'border-amber-500 text-amber-400'
+                          : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:border-zinc-600'
+                      )}
+                    >
+                      {isAll ? 'All' : cat}
+                    </button>
+                  );
+                })}
               </div>
             </header>
 
