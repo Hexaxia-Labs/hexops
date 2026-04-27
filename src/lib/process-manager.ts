@@ -32,6 +32,33 @@ function getLogFilePath(projectId: string): string {
   return join(LOGS_DIR, `${projectId}.log`);
 }
 
+// Read a project's .env.local (and .env) and return key-value pairs.
+// This is needed because Next.js 16 + Turbopack bakes env vars at compile
+// time — if DATABASE_URL isn't in the OS-level process.env when the Turbopack
+// worker starts, it inlines undefined before .env.local ever loads.
+function loadProjectEnvFile(projectPath: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const filename of ['.env', '.env.local']) {
+    const filePath = join(projectPath, filename);
+    if (!existsSync(filePath)) continue;
+    try {
+      const lines = readFileSync(filePath, 'utf-8').split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx === -1) continue;
+        const key = trimmed.slice(0, eqIdx).trim();
+        const value = trimmed.slice(eqIdx + 1).trim();
+        if (key) result[key] = value;
+      }
+    } catch {
+      // ignore unreadable files
+    }
+  }
+  return result;
+}
+
 function addLogEntry(projectId: string, type: 'stdout' | 'stderr', message: string) {
   ensureLogsDir();
   const logFile = getLogFilePath(projectId);
@@ -83,6 +110,7 @@ export function startProject(
           stdio: 'pipe',
           env: {
             ...process.env,
+            ...loadProjectEnvFile(project.path),
             NODE_ENV: 'production',
           },
         });
@@ -110,12 +138,17 @@ export function startProject(
     const projectSettings = getProjectSettings(project.id);
     const projectEnv = projectSettings.env ?? {};
 
+    // Read project's own .env / .env.local so Turbopack sees vars at compile
+    // time (not just after @next/env runs). Explicit projectEnv overrides these.
+    const projectFileEnv = loadProjectEnvFile(project.path);
+
     const child = spawn(cmd, args, {
       cwd: project.path,
       shell: projectSettings.shell ?? true,
       detached: false,
       env: {
         ...process.env,
+        ...projectFileEnv,
         ...projectEnv,
         PORT: project.port.toString(),
         FORCE_COLOR: '1',
