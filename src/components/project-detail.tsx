@@ -107,6 +107,14 @@ interface ProjectInfo {
   scripts: Record<string, string>;
 }
 
+interface VercelDeployment {
+  uid?: string;
+  url: string;
+  state: string;
+  created: string;
+  target?: string;
+}
+
 interface VercelInfo {
   isVercelProject: boolean;
   isLinked: boolean;
@@ -114,12 +122,8 @@ interface VercelInfo {
     projectId: string;
     orgId: string;
   } | null;
-  latestDeployment: {
-    url: string;
-    state: string;
-    created: string;
-    target?: string;
-  } | null;
+  latestDeployment: VercelDeployment | null;
+  deploymentHistory?: VercelDeployment[];
 }
 
 export function ProjectDetail({
@@ -144,6 +148,10 @@ export function ProjectDetail({
   const [projectInfo, setProjectInfo] = useState<ProjectInfo | null>(null);
   const [vercelInfo, setVercelInfo] = useState<VercelInfo | null>(null);
   const [vercelDeploying, setVercelDeploying] = useState<string | null>(null);
+  const [vercelLogs, setVercelLogs] = useState<Array<{ text: string; isError?: boolean }>>([]);
+  const [showVercelLogs, setShowVercelLogs] = useState(false);
+  const [vercelHistory, setVercelHistory] = useState<VercelDeployment[] | null>(null);
+  const [showVercelHistory, setShowVercelHistory] = useState(false);
   const [showStartMenu, setShowStartMenu] = useState(false);
   const [startMode, setStartMode] = useState<'dev' | 'prod' | null>(null);
   const [isUpdatingPackages, setIsUpdatingPackages] = useState(false);
@@ -482,20 +490,50 @@ export function ProjectDetail({
   const handleVercelDeploy = async (production: boolean) => {
     const deployType = production ? 'prod' : 'preview';
     setVercelDeploying(deployType);
+    setVercelLogs([]);
+    setShowVercelLogs(true);
     try {
-      const res = await fetch(`/api/projects/${project.id}/vercel`, {
+      const res = await fetch(`/api/projects/${project.id}/vercel/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ production }),
       });
-      if (res.ok) {
-        await fetchVercelInfo();
+      if (!res.ok || !res.body) return;
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const parts = buf.split('\n\n');
+        buf = parts.pop() ?? '';
+        for (const part of parts) {
+          const dataLine = part.split('\n').find(l => l.startsWith('data:'));
+          if (!dataLine) continue;
+          try {
+            const ev = JSON.parse(dataLine.slice(5));
+            if ('text' in ev) setVercelLogs(prev => [...prev, { text: ev.text, isError: ev.isError }]);
+            if (ev.success !== undefined) await fetchVercelInfo();
+          } catch { /* ignore malformed */ }
+        }
       }
     } catch {
       // Silently fail
     } finally {
       setVercelDeploying(null);
     }
+  };
+
+  const fetchVercelHistory = async () => {
+    try {
+      const res = await fetch(`/api/projects/${project.id}/vercel?history=1`);
+      if (res.ok) {
+        const data = await res.json();
+        setVercelHistory(data.deploymentHistory ?? []);
+        setShowVercelHistory(true);
+      }
+    } catch { /* ignore */ }
   };
 
   // Format uptime
@@ -754,89 +792,151 @@ export function ProjectDetail({
 
           {/* Vercel Row - only show if it's a Vercel project */}
           {vercelInfo?.isVercelProject && (
-            <div className="flex items-center justify-between pb-4 border-b border-zinc-800">
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <Triangle className="h-4 w-4 text-zinc-500" fill="currentColor" />
-                  <span className="text-sm font-medium text-zinc-200">Vercel</span>
+            <div className="pb-4 border-b border-zinc-800 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <Triangle className="h-4 w-4 text-zinc-500" fill="currentColor" />
+                    <span className="text-sm font-medium text-zinc-200">Vercel</span>
+                  </div>
+
+                  {vercelInfo.isLinked ? (
+                    <Badge variant="outline" className="text-xs border-green-500/50 text-green-400">
+                      <Link className="h-3 w-3 mr-1" />
+                      Linked
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-xs border-yellow-500/50 text-yellow-400">
+                      Not linked
+                    </Badge>
+                  )}
+
+                  {vercelInfo.latestDeployment && (
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className={cn(
+                        'px-1.5 py-0.5 rounded text-[10px] uppercase font-medium',
+                        vercelInfo.latestDeployment.state === 'READY'
+                          ? 'bg-green-500/20 text-green-400'
+                          : vercelInfo.latestDeployment.state === 'ERROR'
+                          ? 'bg-red-500/20 text-red-400'
+                          : 'bg-yellow-500/20 text-yellow-400'
+                      )}>
+                        {vercelInfo.latestDeployment.state}
+                      </span>
+                      {vercelInfo.latestDeployment.target && (
+                        <span className="text-zinc-500">({vercelInfo.latestDeployment.target})</span>
+                      )}
+                      {vercelInfo.latestDeployment.url && (
+                        <a
+                          href={`https://${vercelInfo.latestDeployment.url}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-purple-400 hover:text-purple-300 font-mono truncate max-w-[200px]"
+                        >
+                          {vercelInfo.latestDeployment.url}
+                        </a>
+                      )}
+                    </div>
+                  )}
                 </div>
 
-                {vercelInfo.isLinked ? (
-                  <Badge variant="outline" className="text-xs border-green-500/50 text-green-400">
-                    <Link className="h-3 w-3 mr-1" />
-                    Linked
-                  </Badge>
-                ) : (
-                  <Badge variant="outline" className="text-xs border-yellow-500/50 text-yellow-400">
-                    Not linked
-                  </Badge>
-                )}
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-8 text-xs text-zinc-400 hover:text-zinc-100"
+                    onClick={() => { setShowVercelHistory(false); setShowVercelLogs((v) => !v); }}
+                  >
+                    Build logs
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-8 text-xs text-zinc-400 hover:text-zinc-100"
+                    onClick={() => { setShowVercelLogs(false); if (!showVercelHistory) fetchVercelHistory(); else setShowVercelHistory(false); }}
+                  >
+                    History
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-8 text-xs text-zinc-400 hover:text-zinc-100"
+                    onClick={() => handleVercelDeploy(false)}
+                    disabled={vercelDeploying !== null}
+                    title="Deploy preview"
+                  >
+                    <Rocket className={cn('h-3.5 w-3.5 mr-1', vercelDeploying === 'preview' && 'animate-pulse')} />
+                    Preview
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 text-xs border-zinc-700 hover:bg-zinc-800"
+                    onClick={() => handleVercelDeploy(true)}
+                    disabled={vercelDeploying !== null}
+                    title="Deploy to production"
+                  >
+                    <Rocket className={cn('h-3.5 w-3.5 mr-1', vercelDeploying === 'prod' && 'animate-pulse')} />
+                    Production
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-8 text-xs text-zinc-400 hover:text-zinc-100"
+                    onClick={fetchVercelInfo}
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
 
-                {vercelInfo.latestDeployment && (
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className={cn(
-                      'px-1.5 py-0.5 rounded text-[10px] uppercase font-medium',
-                      vercelInfo.latestDeployment.state === 'READY'
-                        ? 'bg-green-500/20 text-green-400'
-                        : vercelInfo.latestDeployment.state === 'ERROR'
-                        ? 'bg-red-500/20 text-red-400'
-                        : 'bg-yellow-500/20 text-yellow-400'
-                    )}>
-                      {vercelInfo.latestDeployment.state}
-                    </span>
-                    {vercelInfo.latestDeployment.target && (
-                      <span className="text-zinc-500">
-                        ({vercelInfo.latestDeployment.target})
+              {/* Build log panel */}
+              {showVercelLogs && (
+                <div className="bg-black rounded-md p-3 max-h-64 overflow-y-auto font-mono text-xs">
+                  {vercelLogs.length === 0 && vercelDeploying && (
+                    <span className="text-zinc-500 animate-pulse">Connecting…</span>
+                  )}
+                  {vercelLogs.length === 0 && !vercelDeploying && (
+                    <span className="text-zinc-600">No deploy logs yet — trigger a deploy above.</span>
+                  )}
+                  {vercelLogs.map((line, i) => (
+                    <div key={i} className={line.isError ? 'text-red-400' : 'text-zinc-300'}>
+                      {line.text}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Deployment history */}
+              {showVercelHistory && vercelHistory && (
+                <div className="space-y-1">
+                  {vercelHistory.length === 0 && (
+                    <p className="text-xs text-zinc-600">No deployments found.</p>
+                  )}
+                  {vercelHistory.map((d, i) => (
+                    <div key={d.uid ?? i} className="flex items-center gap-3 bg-zinc-900 rounded px-2.5 py-1.5 text-xs">
+                      <span className={cn(
+                        'px-1.5 py-0.5 rounded text-[10px] uppercase font-medium flex-shrink-0',
+                        d.state === 'READY' ? 'bg-green-500/20 text-green-400'
+                          : d.state === 'ERROR' ? 'bg-red-500/20 text-red-400'
+                          : 'bg-yellow-500/20 text-yellow-400'
+                      )}>
+                        {d.state}
                       </span>
-                    )}
-                    {vercelInfo.latestDeployment.url && (
-                      <a
-                        href={`https://${vercelInfo.latestDeployment.url}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-purple-400 hover:text-purple-300 font-mono truncate max-w-[200px]"
-                      >
-                        {vercelInfo.latestDeployment.url}
-                      </a>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-8 text-xs text-zinc-400 hover:text-zinc-100"
-                  onClick={() => handleVercelDeploy(false)}
-                  disabled={vercelDeploying !== null}
-                  title="Deploy preview"
-                >
-                  <Rocket className={cn('h-3.5 w-3.5 mr-1', vercelDeploying === 'preview' && 'animate-pulse')} />
-                  Preview
-                </Button>
-
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-8 text-xs border-zinc-700 hover:bg-zinc-800"
-                  onClick={() => handleVercelDeploy(true)}
-                  disabled={vercelDeploying !== null}
-                  title="Deploy to production"
-                >
-                  <Rocket className={cn('h-3.5 w-3.5 mr-1', vercelDeploying === 'prod' && 'animate-pulse')} />
-                  Production
-                </Button>
-
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-8 text-xs text-zinc-400 hover:text-zinc-100"
-                  onClick={fetchVercelInfo}
-                >
-                  <RefreshCw className="h-3.5 w-3.5" />
-                </Button>
-              </div>
+                      {d.target && <span className="text-zinc-500 flex-shrink-0">{d.target}</span>}
+                      {d.url && (
+                        <a href={`https://${d.url}`} target="_blank" rel="noopener noreferrer"
+                          className="text-purple-400 hover:text-purple-300 font-mono truncate">
+                          {d.url}
+                        </a>
+                      )}
+                      <span className="text-zinc-600 flex-shrink-0 ml-auto">
+                        {d.created ? new Date(typeof d.created === 'number' ? d.created : d.created).toLocaleString() : ''}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
