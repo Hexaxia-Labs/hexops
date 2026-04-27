@@ -15,7 +15,7 @@ import { EscalateModal } from '@/components/escalate-modal';
 import { AcceptedRiskPanel } from '@/components/accepted-risk-panel';
 import { ActiveOverridesPanel, type ProjectOverride } from '@/components/active-overrides-panel';
 import { generatePatchCommitMessage, type UpdatedPackage } from '@/lib/patch-commit-message';
-import { GitCommit, Upload, Pencil, X } from 'lucide-react';
+import { GitCommit, Upload, Pencil, X, Download } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 
 interface PatchesData {
@@ -893,6 +893,16 @@ export default function PatchesPage() {
                   ? `Last scan: ${new Date(data.lastScan).toLocaleString()}`
                   : 'Never scanned'}
               </span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-zinc-700 text-zinc-400"
+                onClick={() => window.open('/api/patches/export?format=csv', '_blank')}
+                title="Export patch history as CSV"
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Export
+              </Button>
               <Button
                 variant="outline"
                 size="sm"

@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { CheckCircle2, XCircle, Package, Clock } from 'lucide-react';
+import { CheckCircle2, XCircle, Package, Clock, Download } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 interface PatchHistoryEntry {
@@ -69,6 +70,29 @@ export function PatchHistorySection({ projectId }: PatchHistorySectionProps) {
 
   return (
     <div className="divide-y divide-zinc-800">
+      <div className="px-4 py-2 flex items-center justify-between bg-zinc-900/30">
+        <span className="text-xs text-zinc-500">{total} total update{total !== 1 ? 's' : ''}</span>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-xs text-zinc-500 hover:text-zinc-300"
+            onClick={() => window.open(`/api/patches/export?projectId=${projectId}&format=json`, '_blank')}
+          >
+            <Download className="h-3 w-3 mr-1" />
+            JSON
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-xs text-zinc-500 hover:text-zinc-300"
+            onClick={() => window.open(`/api/patches/export?projectId=${projectId}&format=csv`, '_blank')}
+          >
+            <Download className="h-3 w-3 mr-1" />
+            CSV
+          </Button>
+        </div>
+      </div>
       {history.map((entry) => (
         <div
           key={entry.id}
