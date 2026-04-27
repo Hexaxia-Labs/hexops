@@ -54,6 +54,7 @@ export function PackageHealthSection({ projectId, projectName, initialOutdatedCo
   const [selectedPackages, setSelectedPackages] = useState<Set<string>>(new Set());
   const [updating, setUpdating] = useState(false);
   const [updateOutput, setUpdateOutput] = useState<string | null>(null);
+  const [auditSummary, setAuditSummary] = useState<{ vulnCount: number; criticalCount: number; remainingAdvisories: string[] } | null>(null);
   const hasAutoChecked = useRef(false);
 
   const fetchHealth = async () => {
@@ -112,6 +113,7 @@ export function PackageHealthSection({ projectId, projectName, initialOutdatedCo
     if (selectedPackages.size === 0) return;
     setUpdating(true);
     setUpdateOutput(null);
+    setAuditSummary(null);
     try {
       const res = await fetch(`/api/projects/${projectId}/update`, {
         method: 'POST',
@@ -120,6 +122,7 @@ export function PackageHealthSection({ projectId, projectName, initialOutdatedCo
       });
       const data = await res.json();
       setUpdateOutput(data.output || (data.success ? 'Update complete' : 'Update failed'));
+      if (data.auditSummary) setAuditSummary(data.auditSummary);
       if (data.success) {
         setSelectedPackages(new Set());
         // Refresh health data after update
@@ -335,6 +338,18 @@ export function PackageHealthSection({ projectId, projectName, initialOutdatedCo
             <ArrowUp className={cn('h-3 w-3 mr-1', updating && 'animate-bounce')} />
             {updating ? 'Updating...' : `Update ${selectedPackages.size > 0 ? selectedPackages.size : ''} to Latest`}
           </Button>
+        </div>
+      )}
+
+      {/* Post-patch audit summary */}
+      {auditSummary && (
+        <div className={`rounded-md border px-3 py-2 text-xs flex items-center justify-between ${auditSummary.vulnCount === 0 ? 'border-green-700/50 bg-green-900/20 text-green-400' : 'border-orange-700/50 bg-orange-900/20 text-orange-400'}`}>
+          <span>
+            {auditSummary.vulnCount === 0
+              ? '✓ All advisories cleared after patch'
+              : `${auditSummary.vulnCount} vuln${auditSummary.vulnCount !== 1 ? 's' : ''} still remain: ${auditSummary.remainingAdvisories.slice(0, 3).join(', ')}${auditSummary.remainingAdvisories.length > 3 ? '…' : ''}`}
+          </span>
+          <button onClick={() => setAuditSummary(null)} className="ml-2 opacity-60 hover:opacity-100">✕</button>
         </div>
       )}
 

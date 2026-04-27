@@ -8,6 +8,7 @@ import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { execFile, exec } from 'child_process'
 import { promisify } from 'util'
+import { logger } from '@/lib/logger'
 
 const execFileAsync = promisify(execFile)
 const execAsync = promisify(exec)
@@ -232,14 +233,25 @@ export async function POST(
           }
         }
       } catch (commitErr) {
+        const commitErrMsg = gitErrMsg(commitErr)
+        logger.error('patches', 'escalate_commit_failed', `force_override commit/push failed for ${pkg} in ${id}: ${commitErrMsg}`, {
+          projectId: id,
+          meta: { package: pkg, overrideVersion, error: commitErrMsg },
+        })
         // Revert both package.json and lockfile on failure
         let revertNote = ''
         try {
           await execFileAsync('git', ['checkout', '--', 'package.json', lockfileName], { cwd: project.path, timeout: 30000 })
+          logger.info('patches', 'escalate_reverted', `Reverted package.json and ${lockfileName} after commit failure for ${pkg} in ${id}`, { projectId: id })
         } catch (revertErr) {
-          revertNote = ` (revert also failed: ${gitErrMsg(revertErr)} — repo may be in a dirty state)`
+          const revertErrMsg = gitErrMsg(revertErr)
+          logger.error('patches', 'escalate_revert_failed', `Revert also failed for ${pkg} in ${id}: ${revertErrMsg} — repo may be dirty`, {
+            projectId: id,
+            meta: { package: pkg, revertError: revertErrMsg },
+          })
+          revertNote = ` (revert also failed: ${revertErrMsg} — repo may be in a dirty state)`
         }
-        return NextResponse.json({ error: `Commit/push failed: ${gitErrMsg(commitErr)}${revertNote}` }, { status: 500 })
+        return NextResponse.json({ error: `Commit/push failed: ${commitErrMsg}${revertNote}` }, { status: 500 })
       }
     } else if (action === 'force_major') {
       if (!targetVersion) {
@@ -250,6 +262,28 @@ export async function POST(
       }
 
       record.targetVersion = targetVersion
+
+      // Downgrade guard: refuse if targetVersion is older than installed
+      if (!/^(latest|next|canary)$/.test(targetVersion)) {
+        let installedVersion = ''
+        try {
+          const nmPath = join(project.path, 'node_modules', pkg, 'package.json')
+          if (existsSync(nmPath)) {
+            installedVersion = JSON.parse(readFileSync(nmPath, 'utf-8')).version || ''
+          }
+        } catch { /* skip */ }
+        if (installedVersion) {
+          const iv = installedVersion.replace(/^[\^~]/, '').split('.').map(n => parseInt(n, 10) || 0)
+          const tv = targetVersion.replace(/^[\^~]/, '').split('.').map(n => parseInt(n, 10) || 0)
+          const isDowngrade = iv[0] > tv[0] || (iv[0] === tv[0] && iv[1] > tv[1]) || (iv[0] === tv[0] && iv[1] === tv[1] && (iv[2] ?? 0) > (tv[2] ?? 0))
+          if (isDowngrade) {
+            return NextResponse.json(
+              { error: `Refused: ${targetVersion} is older than installed ${installedVersion} — package is already past this fix` },
+              { status: 409 }
+            )
+          }
+        }
+      }
 
       const pkgJsonPath = join(project.path, 'package.json')
       const pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'))

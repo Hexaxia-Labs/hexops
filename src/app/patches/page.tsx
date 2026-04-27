@@ -117,6 +117,7 @@ export default function PatchesPage() {
   const [scanProgress, setScanProgress] = useState<{ scanned: number; total: number; currentProject: string } | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const [resolvingProjects, setResolvingProjects] = useState<Set<string>>(new Set());
+  const [postPatchAudit, setPostPatchAudit] = useState<Record<string, { vulnCount: number; criticalCount: number; remainingAdvisories: string[] }>>({});
   const [dependabotMap, setDependabotMap] = useState<Record<string, boolean>>({});
   const [escalateItem, setEscalateItem] = useState<PatchQueueItem | null>(null);
   const [escalateModalOpen, setEscalateModalOpen] = useState(false);
@@ -821,6 +822,7 @@ export default function PatchesPage() {
     });
 
     const newResults: UpdateResult[] = [];
+    const auditSummaryByProject: Record<string, { vulnCount: number; criticalCount: number; remainingAdvisories: string[] }> = {};
 
     for (const [projectId, packages] of updatesByProject) {
       const projectName = packages[0]?.projectName || projectId;
@@ -841,6 +843,10 @@ export default function PatchesPage() {
             body: JSON.stringify({ packages: [pkg] }),
           });
           const result = await res.json();
+
+          if (result.auditSummary) {
+            auditSummaryByProject[projectId] = result.auditSummary;
+          }
 
           newResults.unshift({
             projectId,
@@ -874,11 +880,17 @@ export default function PatchesPage() {
     updatingRef.current = false;
     setSelectedPackages(new Set());
     setRecentUpdates(prev => [...newResults, ...prev].slice(0, 20));
+    setPostPatchAudit(auditSummaryByProject);
 
     const successCount = newResults.filter(r => r.success).length;
     const failCount = newResults.filter(r => !r.success).length;
+    const totalRemaining = Object.values(auditSummaryByProject).reduce((s, a) => s + a.vulnCount, 0);
 
-    if (failCount === 0) {
+    if (failCount === 0 && totalRemaining === 0) {
+      toast.success(`Updated ${successCount} package(s) — all advisories cleared`);
+    } else if (failCount === 0 && totalRemaining > 0) {
+      toast.warning(`Updated ${successCount} package(s) — ${totalRemaining} vuln${totalRemaining !== 1 ? 's' : ''} still remain`);
+    } else if (failCount === 0) {
       toast.success(`Updated ${successCount} package(s)`);
     } else {
       toast.warning(`${successCount} succeeded, ${failCount} failed`);
@@ -1034,6 +1046,27 @@ export default function PatchesPage() {
             )}
           </div>
         </div>
+
+        {/* Post-patch audit summary */}
+        {Object.keys(postPatchAudit).length > 0 && (
+          <div className="mx-6 mt-3 rounded-md border border-zinc-700 bg-zinc-900 p-3 text-xs space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-zinc-300">Post-patch audit</span>
+              <button onClick={() => setPostPatchAudit({})} className="text-zinc-600 hover:text-zinc-400">✕</button>
+            </div>
+            {Object.entries(postPatchAudit).map(([pid, audit]) => {
+              const proj = data.queue.find(q => q.projectId === pid);
+              const name = proj?.projectName ?? pid;
+              return (
+                <div key={pid} className={audit.vulnCount === 0 ? 'text-green-400' : 'text-orange-400'}>
+                  {name}: {audit.vulnCount === 0
+                    ? '✓ all advisories cleared'
+                    : `${audit.vulnCount} vuln${audit.vulnCount !== 1 ? 's' : ''} remain (${audit.remainingAdvisories.slice(0, 3).join(', ')}${audit.remainingAdvisories.length > 3 ? '…' : ''})`}
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {/* Active Overrides Panel */}
         {data.activeOverrides && data.activeOverrides.length > 0 && (
