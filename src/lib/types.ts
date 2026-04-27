@@ -94,6 +94,7 @@ export interface GlobalSettings {
   };
   patching: {
     defaultLockfileResolution: LockfileResolutionMode;
+    scanInterval: '1h' | '6h' | '24h' | 'manual';
   };
 }
 
