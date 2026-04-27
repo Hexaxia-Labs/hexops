@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { RadialGauge } from './radial-gauge';
 import { Sparkline } from './sparkline';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
@@ -43,6 +43,7 @@ export function SystemHealth({ patchStatus }: SystemHealthProps) {
   const [cpuHistory, setCpuHistory] = useState<number[]>([]);
   const [memoryHistory, setMemoryHistory] = useState<number[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [mounted, setMounted] = useState(false);
 
   const fetchMetrics = useCallback(async () => {
     try {
@@ -67,6 +68,7 @@ export function SystemHealth({ patchStatus }: SystemHealthProps) {
   }, []);
 
   useEffect(() => {
+    setMounted(true);
     fetchMetrics();
     const interval = setInterval(fetchMetrics, POLL_INTERVAL);
     return () => clearInterval(interval);
@@ -144,7 +146,7 @@ export function SystemHealth({ patchStatus }: SystemHealthProps) {
         {/* Patch Status Pie */}
         <div className="flex flex-col items-center p-2 bg-zinc-900 rounded-lg border border-zinc-800">
           <div className="h-[120px] w-full flex items-center justify-center">
-            {patchData.length > 0 ? (
+            {mounted && patchData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
