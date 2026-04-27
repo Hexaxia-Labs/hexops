@@ -48,6 +48,7 @@ import { PatchHistorySection } from './detail-sections/patch-history-section';
 import { SystemLogsSection } from './detail-sections/system-logs-section';
 import { SettingsSection } from './detail-sections/settings-section';
 import { CodeScanSection } from './detail-sections/code-scan-section';
+import { SupplyChainSection } from './detail-sections/supply-chain-section';
 
 interface ProjectDetailProps {
   project: Project;
@@ -1197,6 +1198,10 @@ export function ProjectDetail({
 
         <CollapsibleSection title="Code Security">
           <CodeScanSection projectId={project.id} />
+        </CollapsibleSection>
+
+        <CollapsibleSection title="Supply Chain">
+          <SupplyChainSection projectId={project.id} />
         </CollapsibleSection>
 
         <CollapsibleSection title="Activity Log">
