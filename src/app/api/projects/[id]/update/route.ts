@@ -245,6 +245,55 @@ export async function POST(
     invalidatePackageStatusCache(cwd);
     clearInMemoryCache(id);
 
+    // Cross-project integrity check: if a package was successfully patched, verify no other
+    // project has the same package installed at a version OLDER than what we just applied.
+    // Catches collateral downgrades caused by stale advisory data (see #79).
+    if (anySucceeded && packages.length > 0) {
+      try {
+        const { getProjects: getAllProjects } = await import('@/lib/config');
+        const { existsSync: fsExists, readFileSync: fsRead } = await import('fs');
+        const { join: pathJoin } = await import('path');
+        const successPatched = results.filter(r => r.success).map(r => r.package);
+        const allProjects = getAllProjects().filter(p => p.id !== id);
+        const collatDamage: Array<{ projectId: string; projectName: string; package: string; found: string; expected: string }> = [];
+        for (const otherProject of allProjects) {
+          for (const result of results.filter(r => r.success)) {
+            const pkg = result.package;
+            const targetVer = packages.find(p => p.name === pkg)?.toVersion;
+            if (!targetVer || /^(latest|next|canary)$/.test(targetVer)) continue;
+            const nmPath = pathJoin(otherProject.path, 'node_modules', pkg, 'package.json');
+            if (!fsExists(nmPath)) continue;
+            try {
+              const installedVer = JSON.parse(fsRead(nmPath, 'utf-8')).version;
+              if (!installedVer) continue;
+              const iv = installedVer.split('.').map((n: string) => parseInt(n, 10) || 0);
+              const tv = targetVer.replace(/^[\^~]/, '').split('.').map((n: string) => parseInt(n, 10) || 0);
+              const isOlder = iv[0] < tv[0] || (iv[0] === tv[0] && iv[1] < tv[1]) || (iv[0] === tv[0] && iv[1] === tv[1] && (iv[2] ?? 0) < (tv[2] ?? 0));
+              if (isOlder) {
+                collatDamage.push({ projectId: otherProject.id, projectName: otherProject.name, package: pkg, found: installedVer, expected: targetVer });
+                logger.warn('patches', 'collateral_downgrade_detected', `${otherProject.name} has ${pkg}@${installedVer} which is older than patched ${targetVer}`, {
+                  projectId: otherProject.id,
+                  meta: { package: pkg, installed: installedVer, expected: targetVer, affectedBy: id },
+                });
+              }
+            } catch { /* skip */ }
+          }
+        }
+        if (collatDamage.length > 0) {
+          const { addNotification } = await import('@/lib/notifications');
+          addNotification({
+            severity: 'error',
+            category: 'security',
+            title: 'Possible collateral downgrade detected',
+            message: `${collatDamage.length} project(s) may have older versions of recently-patched packages: ${[...new Set(collatDamage.map(d => d.projectName))].join(', ')}`,
+            actionUrl: '/patches',
+            meta: { collatDamage },
+          });
+        }
+        void successPatched; // suppress unused warning
+      } catch { /* non-fatal */ }
+    }
+
     let auditSummary: { vulnCount: number; criticalCount: number; remainingAdvisories: string[] } | undefined;
     if (anySucceeded) {
       try {
