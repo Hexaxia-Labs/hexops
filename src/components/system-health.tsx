@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { RadialGauge } from './radial-gauge';
 import { Sparkline } from './sparkline';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
