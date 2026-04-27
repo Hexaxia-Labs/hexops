@@ -80,6 +80,7 @@ interface Metrics {
     responseTimeMs: number | null;
   };
   startedAt: string | null;
+  healthCheck: { ok: boolean; statusCode: number | null; latencyMs: number; url: string } | null;
 }
 
 interface GitInfo {
@@ -872,6 +873,15 @@ export function ProjectDetail({
               value={metrics?.process.pid?.toString() ?? '-'}
               active={isRunning && metrics?.process.pid !== null}
             />
+            {metrics?.healthCheck && (
+              <MetricItem
+                icon={<Activity className="h-4 w-4" />}
+                label="Health"
+                value={metrics.healthCheck.ok ? `${metrics.healthCheck.latencyMs}ms` : (metrics.healthCheck.statusCode ? `${metrics.healthCheck.statusCode}` : 'Down')}
+                active={metrics.healthCheck.ok}
+                color={metrics.healthCheck.ok ? 'green' : 'red'}
+              />
+            )}
           </div>
 
           {/* Action Buttons */}

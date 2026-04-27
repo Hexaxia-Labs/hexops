@@ -2,10 +2,21 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getProject } from '@/lib/config';
 import { getProcessInfo } from '@/lib/process-manager';
 import { checkPort } from '@/lib/port-checker';
+import { getProjectSettings } from '@/lib/settings';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
+
+async function checkHealthUrl(url: string): Promise<{ ok: boolean; statusCode: number | null; latencyMs: number }> {
+  const start = Date.now();
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(5000), method: 'GET' });
+    return { ok: res.ok, statusCode: res.status, latencyMs: Date.now() - start };
+  } catch {
+    return { ok: false, statusCode: null, latencyMs: Date.now() - start };
+  }
+}
 
 interface ProcessMetrics {
   pid: number | null;
@@ -154,11 +165,20 @@ export async function GET(
 
     const isRunning = portMetrics.isOpen || pid !== null;
 
+    // Health check URL (from per-project settings)
+    const settings = getProjectSettings(id);
+    let healthCheck: { ok: boolean; statusCode: number | null; latencyMs: number; url: string } | null = null;
+    if (settings.monitoring.healthCheckUrl && isRunning) {
+      const result = await checkHealthUrl(settings.monitoring.healthCheckUrl);
+      healthCheck = { ...result, url: settings.monitoring.healthCheckUrl };
+    }
+
     return NextResponse.json({
       status: isRunning ? 'running' : 'stopped',
       process: processMetrics,
       port: portMetrics,
       startedAt: processInfo?.startedAt || null,
+      healthCheck,
     });
   } catch (error) {
     console.error('Error fetching metrics:', error);

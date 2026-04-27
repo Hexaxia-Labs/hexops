@@ -3,6 +3,7 @@ import { appendFileSync, readFileSync, existsSync, mkdirSync, writeFileSync } fr
 import { join } from 'path';
 import type { ProjectConfig, LogEntry } from './types';
 import { logger } from './logger';
+import { getProjectSettings } from './settings';
 
 interface ProcessEntry {
   process: ChildProcess;
@@ -99,12 +100,17 @@ export function startProject(
     // Security note: project.scripts comes from local config file, not user input
     const [cmd, ...args] = script.split(' ');
 
+    // Merge per-project env vars from settings
+    const projectSettings = getProjectSettings(project.id);
+    const projectEnv = projectSettings.env ?? {};
+
     const child = spawn(cmd, args, {
       cwd: project.path,
-      shell: true, // Required for pnpm/npm scripts
+      shell: projectSettings.shell ?? true,
       detached: false,
       env: {
         ...process.env,
+        ...projectEnv,
         PORT: project.port.toString(),
         FORCE_COLOR: '1',
         NODE_ENV: mode === 'prod' ? 'production' : 'development',
