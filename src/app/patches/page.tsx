@@ -1076,10 +1076,10 @@ export default function PatchesPage() {
           />
         )}
 
-        {/* Filters & Actions */}
-        <div className="border-b border-zinc-800 px-6 py-3 flex items-center justify-between">
+        {/* Filters & Actions — two rows */}
+        <div className="border-b border-zinc-800 px-6 py-2 space-y-1.5">
+          {/* Row 1: Type + View */}
           <div className="flex items-center gap-4">
-            {/* Type filter */}
             <div className="flex items-center gap-2">
               <span className="text-xs text-zinc-500 mr-1">Type:</span>
               <Button
@@ -1110,8 +1110,8 @@ export default function PatchesPage() {
               </Button>
             </div>
 
-            {/* View mode toggle */}
             <div className="h-5 w-px bg-zinc-700" />
+
             <div className="flex items-center gap-1">
               <span className="text-xs text-zinc-500 mr-1">View:</span>
               <Button
@@ -1133,100 +1133,99 @@ export default function PatchesPage() {
                 <FolderTree className="h-3.5 w-3.5" />
               </Button>
             </div>
+          </div>
 
-            {/* Override and breaking counts */}
-            {overrideCount > 0 && (
-              <>
-                <div className="h-5 w-px bg-zinc-700" />
+          {/* Row 2: badges + selection actions */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {overrideCount > 0 && (
                 <span className="text-xs text-blue-400" title="Transitive dependencies that will be fixed via package manager override">
                   {overrideCount} override{overrideCount !== 1 ? 's' : ''}
                 </span>
-              </>
-            )}
-            {breakingCount > 0 && (
-              <>
-                <div className="h-5 w-px bg-zinc-700" />
-                <span className="text-xs text-orange-400" title="Updates that require a semver-major version change">
-                  {breakingCount} breaking
-                </span>
-              </>
-            )}
+              )}
+              {breakingCount > 0 && (
+                <>
+                  {overrideCount > 0 && <div className="h-3.5 w-px bg-zinc-700" />}
+                  <span className="text-xs text-orange-400" title="Updates that require a semver-major version change">
+                    {breakingCount} breaking
+                  </span>
+                </>
+              )}
+              {heldCount > 0 && (
+                <>
+                  {(overrideCount > 0 || breakingCount > 0) && <div className="h-3.5 w-px bg-zinc-700" />}
+                  <Button
+                    variant={showHeld ? 'secondary' : 'ghost'}
+                    size="sm"
+                    className={cn(
+                      'h-7 text-xs',
+                      showHeld ? 'bg-zinc-500/20 hover:bg-zinc-500/30 text-zinc-400' : ''
+                    )}
+                    onClick={() => setShowHeld(!showHeld)}
+                    title={showHeld ? 'Hide held packages' : 'Show held packages'}
+                  >
+                    <PauseCircle className="h-3 w-3 mr-1" />
+                    On Hold ({heldCount})
+                  </Button>
+                </>
+              )}
+            </div>
 
-            {/* Held toggle */}
-            {heldCount > 0 && (
-              <>
-                <div className="h-5 w-px bg-zinc-700" />
+            {/* Selection actions */}
+            {selectedPackages.size > 0 ? (
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-zinc-400">{selectedPackages.size} selected</span>
                 <Button
-                  variant={showHeld ? 'secondary' : 'ghost'}
+                  variant="ghost"
                   size="sm"
-                  className={cn(
-                    'h-7 text-xs',
-                    showHeld ? 'bg-zinc-500/20 hover:bg-zinc-500/30 text-zinc-400' : ''
-                  )}
-                  onClick={() => setShowHeld(!showHeld)}
-                  title={showHeld ? 'Hide held packages' : 'Show held packages'}
+                  className="h-7 text-xs text-zinc-400"
+                  onClick={clearSelection}
+                >
+                  Clear
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs border-zinc-600 text-zinc-300 hover:bg-zinc-800"
+                  onClick={handleValidate}
+                  disabled={validating || updating}
+                  title="Run build validation in a worktree before applying"
+                >
+                  <Wrench className={cn('h-3 w-3 mr-1', validating && 'animate-spin')} />
+                  {validating ? (validationPhase ?? 'Validating…') : 'Validate'}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs border-zinc-600 text-zinc-400 hover:bg-zinc-800"
+                  onClick={() => handleBatchHold(true)}
+                  disabled={updating}
+                  title="Hold all selected packages"
                 >
                   <PauseCircle className="h-3 w-3 mr-1" />
-                  On Hold ({heldCount})
+                  Hold All
                 </Button>
-              </>
-            )}
-          </div>
-
-          {/* Selection actions */}
-          {selectedPackages.size > 0 ? (
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-zinc-400">{selectedPackages.size} selected</span>
+                <Button
+                  size="sm"
+                  className="h-7 text-xs bg-purple-600 hover:bg-purple-700"
+                  onClick={handleUpdateSelected}
+                  disabled={updating}
+                >
+                  <ArrowUp className={cn('h-3 w-3 mr-1', updating && 'animate-bounce')} />
+                  {updating ? 'Updating...' : 'Update Selected'}
+                </Button>
+              </div>
+            ) : filteredQueue.length > 0 ? (
               <Button
                 variant="ghost"
                 size="sm"
                 className="h-7 text-xs text-zinc-400"
-                onClick={clearSelection}
+                onClick={selectAll}
               >
-                Clear
+                Select All
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 text-xs border-zinc-600 text-zinc-300 hover:bg-zinc-800"
-                onClick={handleValidate}
-                disabled={validating || updating}
-                title="Run build validation in a worktree before applying"
-              >
-                <Wrench className={cn('h-3 w-3 mr-1', validating && 'animate-spin')} />
-                {validating ? (validationPhase ?? 'Validating…') : 'Validate'}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 text-xs border-zinc-600 text-zinc-400 hover:bg-zinc-800"
-                onClick={() => handleBatchHold(true)}
-                disabled={updating}
-                title="Hold all selected packages"
-              >
-                <PauseCircle className="h-3 w-3 mr-1" />
-                Hold All
-              </Button>
-              <Button
-                size="sm"
-                className="h-7 text-xs bg-purple-600 hover:bg-purple-700"
-                onClick={handleUpdateSelected}
-                disabled={updating}
-              >
-                <ArrowUp className={cn('h-3 w-3 mr-1', updating && 'animate-bounce')} />
-                {updating ? 'Updating...' : 'Update Selected'}
-              </Button>
-            </div>
-          ) : filteredQueue.length > 0 ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 text-xs text-zinc-400"
-              onClick={selectAll}
-            >
-              Select All
-            </Button>
-          ) : null}
+            ) : null}
+          </div>
         </div>
 
         {/* Validation result banner */}
