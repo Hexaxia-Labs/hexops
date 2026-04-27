@@ -48,6 +48,7 @@ const CATEGORY_COLORS: Record<LogCategory, string> = {
   git: 'text-green-400',
   api: 'text-orange-400',
   system: 'text-zinc-400',
+  scheduler: 'text-cyan-400',
 };
 
 export function LogViewer({ projectId, showProjectFilter = true, className }: LogViewerProps) {
