@@ -4,6 +4,11 @@ import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 
+// Cache metrics for 4.5s — prevents redundant sampling when multiple tabs poll simultaneously
+const CACHE_TTL = 4500;
+let cachedMetrics: SystemMetrics | null = null;
+let cacheTime = 0;
+
 export interface SystemMetrics {
   cpu: {
     percent: number;
@@ -119,6 +124,10 @@ async function getDiskUsage(): Promise<{ percent: number; usedGB: number; totalG
  * Get all system metrics
  */
 export async function getSystemMetrics(): Promise<SystemMetrics> {
+  if (cachedMetrics && Date.now() - cacheTime < CACHE_TTL) {
+    return cachedMetrics;
+  }
+
   try {
     const cpus = os.cpus();
     const [cpuPercent, disk] = await Promise.all([
@@ -128,7 +137,7 @@ export async function getSystemMetrics(): Promise<SystemMetrics> {
 
     const memory = getMemoryUsage();
 
-    return {
+    cachedMetrics = {
       cpu: {
         percent: cpuPercent,
         cores: cpus?.length || 0,
@@ -138,9 +147,10 @@ export async function getSystemMetrics(): Promise<SystemMetrics> {
       disk,
       timestamp: Date.now(),
     };
+    cacheTime = Date.now();
+    return cachedMetrics;
   } catch (error) {
     console.error('Error getting system metrics:', error);
-    // Return safe defaults
     return {
       cpu: { percent: 0, cores: 0, model: 'Unknown' },
       memory: { percent: 0, usedGB: 0, totalGB: 0 },

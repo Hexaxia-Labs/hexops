@@ -35,8 +35,8 @@ interface SystemHealthProps {
   patchStatus?: PatchStatus;
 }
 
-const HISTORY_SIZE = 12; // 60 seconds at 5-second intervals
-const POLL_INTERVAL = 5000; // 5 seconds
+const HISTORY_SIZE = 12; // 120 seconds at 10-second intervals
+const POLL_INTERVAL = 10000; // 10 seconds
 
 export function SystemHealth({ patchStatus }: SystemHealthProps) {
   const [metrics, setMetrics] = useState<SystemMetrics | null>(null);

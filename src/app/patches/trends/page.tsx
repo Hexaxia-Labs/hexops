@@ -51,6 +51,7 @@ const TOOLTIP_STYLE = { backgroundColor: '#18181b', border: '1px solid #3f3f46',
 export default function PatchTrendsPage() {
   const [data, setData] = useState<TrendsData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [mounted, setMounted] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -62,7 +63,7 @@ export default function PatchTrendsPage() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { setMounted(true); load(); }, []);
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 p-6">
@@ -104,28 +105,30 @@ export default function PatchTrendsPage() {
             {data.weeks.length > 0 ? (
               <div className="bg-zinc-900 rounded-lg p-4">
                 <h2 className="text-sm font-medium text-zinc-300 mb-4">Weekly patch activity</h2>
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={data.weeks} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                    <XAxis
-                      dataKey="week"
-                      tick={TICK_STYLE}
-                      tickFormatter={(v: string) => v.slice(5)}
-                      interval="preserveStartEnd"
-                    />
-                    <YAxis tick={TICK_STYLE} allowDecimals={false} />
-                    <Tooltip
-                      contentStyle={TOOLTIP_STYLE}
-                      labelStyle={{ color: '#a1a1aa' }}
-                      formatter={(value, name) => [value, name === 'success' ? 'Succeeded' : 'Failed']}
-                    />
-                    <Legend
-                      wrapperStyle={{ fontSize: 12, color: '#a1a1aa' }}
-                      formatter={(v: string) => v === 'success' ? 'Succeeded' : 'Failed'}
-                    />
-                    <Bar dataKey="success" stackId="a" fill="#22c55e" radius={[0, 0, 0, 0]} />
-                    <Bar dataKey="failure" stackId="a" fill="#ef4444" radius={[3, 3, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+                {mounted && (
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={data.weeks} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                      <XAxis
+                        dataKey="week"
+                        tick={TICK_STYLE}
+                        tickFormatter={(v: string) => v.slice(5)}
+                        interval="preserveStartEnd"
+                      />
+                      <YAxis tick={TICK_STYLE} allowDecimals={false} />
+                      <Tooltip
+                        contentStyle={TOOLTIP_STYLE}
+                        labelStyle={{ color: '#a1a1aa' }}
+                        formatter={(value, name) => [value, name === 'success' ? 'Succeeded' : 'Failed']}
+                      />
+                      <Legend
+                        wrapperStyle={{ fontSize: 12, color: '#a1a1aa' }}
+                        formatter={(v: string) => v === 'success' ? 'Succeeded' : 'Failed'}
+                      />
+                      <Bar dataKey="success" stackId="a" fill="#22c55e" radius={[0, 0, 0, 0]} />
+                      <Bar dataKey="failure" stackId="a" fill="#ef4444" radius={[3, 3, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
               </div>
             ) : (
               <div className="bg-zinc-900 rounded-lg p-8 text-center text-zinc-500 text-sm">

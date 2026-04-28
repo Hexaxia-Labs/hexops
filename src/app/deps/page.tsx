@@ -30,6 +30,7 @@ export default function DepsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -41,7 +42,7 @@ export default function DepsPage() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { setMounted(true); load(); }, []);
 
   const filtered = (data?.shared ?? []).filter(d =>
     !search || d.name.toLowerCase().includes(search.toLowerCase())
@@ -92,23 +93,25 @@ export default function DepsPage() {
             {chartData.length > 0 && (
               <div className="bg-zinc-900 rounded-lg p-4">
                 <h2 className="text-sm font-medium text-zinc-300 mb-4">Most shared packages (top 20)</h2>
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={chartData} layout="vertical" margin={{ top: 0, right: 20, left: 100, bottom: 0 }}>
-                    <XAxis type="number" tick={{ fill: '#71717a', fontSize: 11 }} allowDecimals={false} />
-                    <YAxis type="category" dataKey="name" tick={{ fill: '#a1a1aa', fontSize: 11 }} width={100} />
-                    <Tooltip
-                      contentStyle={TOOLTIP_STYLE}
-                      cursor={{ fill: '#27272a' }}
-                      formatter={(value) => [`${value} projects`, 'Used in']}
-                      labelFormatter={(_, payload) => payload?.[0]?.payload?.fullName ?? ''}
-                    />
-                    <Bar dataKey="count" radius={[0, 3, 3, 0]}>
-                      {chartData.map((entry, i) => (
-                        <Cell key={i} fill={entry.isVulnerable ? '#ef4444' : '#6366f1'} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+                {mounted && (
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={chartData} layout="vertical" margin={{ top: 0, right: 20, left: 100, bottom: 0 }}>
+                      <XAxis type="number" tick={{ fill: '#71717a', fontSize: 11 }} allowDecimals={false} />
+                      <YAxis type="category" dataKey="name" tick={{ fill: '#a1a1aa', fontSize: 11 }} width={100} />
+                      <Tooltip
+                        contentStyle={TOOLTIP_STYLE}
+                        cursor={{ fill: '#27272a' }}
+                        formatter={(value) => [`${value} projects`, 'Used in']}
+                        labelFormatter={(_, payload) => payload?.[0]?.payload?.fullName ?? ''}
+                      />
+                      <Bar dataKey="count" radius={[0, 3, 3, 0]}>
+                        {chartData.map((entry, i) => (
+                          <Cell key={i} fill={entry.isVulnerable ? '#ef4444' : '#6366f1'} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
                 <div className="flex items-center gap-4 mt-2 text-xs text-zinc-500">
                   <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-indigo-500 inline-block" />Normal</span>
                   <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-red-500 inline-block" />Has known vulnerability</span>
