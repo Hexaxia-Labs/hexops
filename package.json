@@ -47,7 +47,9 @@
       "node-pty"
     ],
     "overrides": {
-      "postcss": "8.5.10"
+      "postcss": "8.5.10",
+      "hono": "4.12.18",
+      "ip-address": "10.2.0"
     }
   },
   "devDependencies": {
