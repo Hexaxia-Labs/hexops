@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ChevronDown, ChevronRight, X, Loader2 } from 'lucide-react';
@@ -20,11 +20,16 @@ export interface ProjectOverride {
 interface ActiveOverridesPanelProps {
   overrides: ProjectOverride[];
   onRemoved: () => void;
+  forceExpand?: boolean;
 }
 
-export function ActiveOverridesPanel({ overrides, onRemoved }: ActiveOverridesPanelProps) {
+export function ActiveOverridesPanel({ overrides, onRemoved, forceExpand }: ActiveOverridesPanelProps) {
   const [expanded, setExpanded] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (forceExpand) setExpanded(true);
+  }, [forceExpand]);
 
   if (overrides.length === 0) return null;
 
@@ -54,7 +59,7 @@ export function ActiveOverridesPanel({ overrides, onRemoved }: ActiveOverridesPa
   };
 
   return (
-    <div className="border-b border-zinc-800 bg-zinc-900/30">
+    <div id="active-overrides-panel" className="border-b border-zinc-800 bg-zinc-900/30">
       <button
         className="w-full flex items-center gap-2 px-6 py-2.5 text-left hover:bg-zinc-800/30 transition-colors"
         onClick={() => setExpanded(!expanded)}
@@ -74,7 +79,7 @@ export function ActiveOverridesPanel({ overrides, onRemoved }: ActiveOverridesPa
       </button>
 
       {expanded && (
-        <div className="px-6 pb-3 space-y-1.5">
+        <div className="px-6 pb-3 space-y-1.5 max-h-64 overflow-y-auto">
           {overrides.map((override) => {
             const key = `${override.projectId}:${override.package}`;
             const isRemoving = removing === key;
