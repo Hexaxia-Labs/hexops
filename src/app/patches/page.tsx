@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { PatchesSidebar, type UpdateResult, type UpdateStatus } from '@/components/patches-sidebar';
-import { RefreshCw, Shield, Package, ArrowUp, List, FolderTree, ChevronDown, ChevronRight, AlertTriangle, Link as LinkIcon, PauseCircle, PlayCircle, ExternalLink, HelpCircle, Wrench, Siren, TrendingUp } from 'lucide-react';
+import { RefreshCw, Shield, Package, ArrowUp, List, FolderTree, ChevronDown, ChevronRight, AlertTriangle, Link as LinkIcon, PauseCircle, PlayCircle, ExternalLink, HelpCircle, Wrench, Siren, TrendingUp, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import type { PatchQueueItem, PatchSummary } from '@/lib/types';
@@ -121,6 +121,8 @@ export default function PatchesPage() {
   const [dependabotMap, setDependabotMap] = useState<Record<string, boolean>>({});
   const [escalateItem, setEscalateItem] = useState<PatchQueueItem | null>(null);
   const [escalateModalOpen, setEscalateModalOpen] = useState(false);
+  const [expandOverridesPanel, setExpandOverridesPanel] = useState(false);
+  const [fixingOverrides, setFixingOverrides] = useState<Set<string>>(new Set());
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState<{ passed: boolean; output: string; projectId: string } | null>(null);
   const [validationPhase, setValidationPhase] = useState<string | null>(null);
@@ -740,6 +742,47 @@ export default function PatchesPage() {
     }
   };
 
+  const handleFixOverride = async (item: PatchQueueItem) => {
+    const key = getItemKey(item);
+    setFixingOverrides(prev => new Set(prev).add(key));
+    try {
+      const removeRes = await fetch(`/api/projects/${item.projectId}/override-remove`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ package: item.package }),
+      });
+      if (!removeRes.ok && removeRes.status !== 404) {
+        const data = await removeRes.json();
+        toast.error(data.error || 'Failed to remove override');
+        return;
+      }
+      const updateRes = await fetch(`/api/projects/${item.projectId}/update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          packages: [{
+            name: item.package,
+            toVersion: item.targetVersion,
+            fromVersion: item.currentVersion,
+            fixViaOverride: item.fixViaOverride,
+            fixByParent: item.fixByParent,
+          }],
+        }),
+      });
+      if (!updateRes.ok) {
+        const data = await updateRes.json();
+        toast.error(data.error || 'Failed to apply patch');
+        return;
+      }
+      toast.success(`Fixed ${item.package} — patch applied`);
+      fetchPatches(true);
+    } catch {
+      toast.error('Failed to fix override');
+    } finally {
+      setFixingOverrides(prev => { const next = new Set(prev); next.delete(key); return next; });
+    }
+  };
+
   const handleBatchHold = useCallback(async (hold: boolean) => {
     if (!data || selectedPackages.size === 0) return;
     const selectedItems = (data.queue ?? []).filter((item) => selectedPackages.has(getItemKey(item)));
@@ -1073,6 +1116,7 @@ export default function PatchesPage() {
           <ActiveOverridesPanel
             overrides={data.activeOverrides}
             onRemoved={() => fetchPatches(true)}
+            forceExpand={expandOverridesPanel}
           />
         )}
 
@@ -1284,6 +1328,9 @@ export default function PatchesPage() {
                     onHold={handleHold}
                     showProject={true}
                     onEscalate={handleEscalate}
+                    onExpandOverrides={() => setExpandOverridesPanel(true)}
+                    onFixOverride={handleFixOverride}
+                    isFixingOverride={fixingOverrides.has(key)}
                   />
                 );
               })}
@@ -1507,6 +1554,9 @@ export default function PatchesPage() {
                                   onHold={handleHold}
                                   showProject={false}
                                   onEscalate={handleEscalate}
+                                  onExpandOverrides={() => setExpandOverridesPanel(true)}
+                                  onFixOverride={handleFixOverride}
+                                  isFixingOverride={fixingOverrides.has(key)}
                                 />
                               );
                             })}
@@ -1561,6 +1611,9 @@ export default function PatchesPage() {
                               onHold={handleHold}
                               showProject={false}
                               onEscalate={handleEscalate}
+                              onExpandOverrides={() => setExpandOverridesPanel(true)}
+                              onFixOverride={handleFixOverride}
+                              isFixingOverride={fixingOverrides.has(key)}
                             />
                           );
                         })}
@@ -1630,9 +1683,12 @@ interface PatchRowProps {
   onHold: (projectId: string, packageName: string, hold: boolean) => void;
   showProject: boolean;
   onEscalate?: (item: PatchQueueItem) => void;
+  onExpandOverrides?: () => void;
+  onFixOverride?: (item: PatchQueueItem) => void;
+  isFixingOverride?: boolean;
 }
 
-function PatchRow({ item, itemKey, isSelected, onToggle, onHold, showProject, onEscalate }: PatchRowProps) {
+function PatchRow({ item, itemKey, isSelected, onToggle, onHold, showProject, onEscalate, onExpandOverrides, onFixOverride, isFixingOverride }: PatchRowProps) {
   const [showDetails, setShowDetails] = useState(false);
   const isTransitive = item.isDirect === false;
   const isHeld = item.isHeld === true;
@@ -1747,9 +1803,25 @@ function PatchRow({ item, itemKey, isSelected, onToggle, onHold, showProject, on
             </p>
           )}
           {isTransitive && item.fixViaOverride && (
-            <p className="text-xs text-blue-400/70 mt-1">
-              Fix: package manager override{item.fixByParent ? ` (updating ${item.fixByParent.name} requires breaking change)` : ''}
-            </p>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-xs text-blue-400/70">
+                Fix: package manager override{item.fixByParent ? ` (updating ${item.fixByParent.name} requires breaking change)` : ''}
+              </span>
+              <button
+                className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded border border-blue-500/30 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 hover:text-blue-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={isFixingOverride}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onFixOverride?.(item);
+                }}
+              >
+                {isFixingOverride ? (
+                  <><Loader2 className="h-3 w-3 animate-spin" />fixing…</>
+                ) : (
+                  <><Wrench className="h-3 w-3" />fix now</>
+                )}
+              </button>
+            </div>
           )}
           {showProject && (
             <p className="text-xs text-zinc-600 mt-1">

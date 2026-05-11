@@ -113,7 +113,7 @@ export async function POST(
         }
 
         let effectiveFromVersion = pkg.fromVersion || '';
-        if (!effectiveFromVersion && !/^(latest|next|canary)$/.test(targetVersion)) {
+        if (!effectiveFromVersion && !/^(latest|next|canary|resolve-latest)$/.test(targetVersion)) {
           try {
             const nmPath = join(cwd, 'node_modules', pkg.name, 'package.json');
             if (existsSync(nmPath)) {
@@ -121,7 +121,7 @@ export async function POST(
             }
           } catch { /* fall through */ }
         }
-        if (effectiveFromVersion && !/^(latest|next|canary)$/.test(targetVersion)) {
+        if (effectiveFromVersion && !/^(latest|next|canary|resolve-latest)$/.test(targetVersion)) {
           const fv = effectiveFromVersion.replace(/^[\^~]/, '').split('.').map(n => parseInt(n, 10) || 0);
           const tv = targetVersion.replace(/^[\^~]/, '').split('.').map(n => parseInt(n, 10) || 0);
           const isDowngrade = fv[0] > tv[0] || (fv[0] === tv[0] && fv[1] > tv[1]) || (fv[0] === tv[0] && fv[1] === tv[1] && (fv[2] ?? 0) > (tv[2] ?? 0));
