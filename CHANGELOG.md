@@ -5,6 +5,22 @@ All notable changes to HexOps are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-05-11
+
+### Added
+- Inline "fix now" action on `fixViaOverride` patch rows — chains override-remove → update in a single click with loading state
+
+### Fixed
+- `resolve-latest` target version now bypasses the downgrade guard in the update route (was being parsed as `0.0.0`, causing all transitive override patches to be refused)
+- `override-remove` 404 response treated as no-op in the fix-override flow — allows patching transitive deps that have no pre-existing override written
+- Active overrides panel is now scrollable (`max-h-64 overflow-y-auto`) and supports `forceExpand` prop
+
+### Security
+- next 16.2.4 → 16.2.6 (7 high CVEs: middleware bypass, DoS, SSRF, XSS)
+- fast-uri 3.1.0 → 3.1.2 (GHSA-q3j6-qgpj-74h6, GHSA-v39h-62p7-jpjc)
+
+---
+
 ## [0.10.2] - 2026-03-21
 
 ### Added
