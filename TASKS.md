@@ -13,5 +13,9 @@ All tasks from the original backlog are complete as of 2026-04-27.
 - [x] P3: HMR stale-server — git SHA at startup + dev-mode sidebar notice
 - [x] P3: Cross-project collateral downgrade detection after patch (#79)
 
+## Queued
+- [ ] P1: Stop signal propagation + verify-port-release (#90) — plan: `docs/superpowers/plans/2026-05-18-process-lifecycle-and-metrics-fixes.md`
+- [ ] P2: Metrics endpoint aggregates RSS across process tree (#91) — same plan
+
 ## Future / Large
 - [ ] HexOps Agent Phase 2 — dashboard chat UI (AI SDK v6 + provider API key)
