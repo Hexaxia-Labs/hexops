@@ -12,6 +12,7 @@ import {
 interface GitSectionProps {
   projectId: string;
   projectPath: string;
+  onBranchChange?: () => void;
 }
 
 interface GitInfo {
@@ -39,7 +40,7 @@ interface Stash {
   date: string;
 }
 
-export function GitSection({ projectId }: GitSectionProps) {
+export function GitSection({ projectId, onBranchChange }: GitSectionProps) {
   const [info, setInfo] = useState<GitInfo | null>(null);
   const [branches, setBranches] = useState<BranchInfo | null>(null);
   const [stashes, setStashes] = useState<Stash[]>([]);
@@ -47,6 +48,7 @@ export function GitSection({ projectId }: GitSectionProps) {
   const [error, setError] = useState<string | null>(null);
 
   const [branchOp, setBranchOp] = useState<string | null>(null);
+  const [pickedBranch, setPickedBranch] = useState('');
   const [newBranchName, setNewBranchName] = useState('');
   const [showNewBranch, setShowNewBranch] = useState(false);
   const [stashOp, setStashOp] = useState<string | null>(null);
@@ -87,6 +89,8 @@ export function GitSection({ projectId }: GitSectionProps) {
       await fetchAll();
       setShowNewBranch(false);
       setNewBranchName('');
+      setPickedBranch('');
+      onBranchChange?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Branch switch failed');
     } finally {
@@ -145,27 +149,37 @@ export function GitSection({ projectId }: GitSectionProps) {
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5">
             <GitBranch className="h-3.5 w-3.5 text-zinc-500" />
-            {allBranches.length > 0 ? (
-              <select
-                value=""
-                disabled={!!branchOp}
-                onChange={(e) => { if (e.target.value) switchBranch(e.target.value); }}
-                className="text-xs bg-zinc-900 border border-zinc-700 text-zinc-200 rounded px-1.5 py-0.5 h-7 cursor-pointer"
-              >
-                <option value="" disabled>{branchOp ? 'Switching…' : info.branch}</option>
-                {otherLocal.length > 0 && (
-                  <optgroup label="Local">
-                    {otherLocal.map((b) => <option key={b} value={b}>{b}</option>)}
-                  </optgroup>
-                )}
-                {remoteOnly.length > 0 && (
-                  <optgroup label="Remote">
-                    {remoteOnly.map((b) => <option key={b} value={b}>{b}</option>)}
-                  </optgroup>
-                )}
-              </select>
-            ) : (
-              <span className="text-sm font-medium text-zinc-200">{info.branch}</span>
+            <span className="text-sm font-medium text-zinc-200">{info.branch}</span>
+            {allBranches.length > 0 && (
+              <>
+                <select
+                  value={pickedBranch}
+                  disabled={!!branchOp}
+                  onChange={(e) => setPickedBranch(e.target.value)}
+                  className="text-xs bg-zinc-900 border border-zinc-700 text-zinc-200 rounded px-1.5 py-0.5 h-7 cursor-pointer ml-2"
+                >
+                  <option value="">Switch to…</option>
+                  {otherLocal.length > 0 && (
+                    <optgroup label="Local">
+                      {otherLocal.map((b) => <option key={b} value={b}>{b}</option>)}
+                    </optgroup>
+                  )}
+                  {remoteOnly.length > 0 && (
+                    <optgroup label="Remote">
+                      {remoteOnly.map((b) => <option key={b} value={b}>{b}</option>)}
+                    </optgroup>
+                  )}
+                </select>
+                <Button
+                  size="sm"
+                  className="h-7 text-xs"
+                  disabled={!pickedBranch || !!branchOp}
+                  onClick={() => pickedBranch && switchBranch(pickedBranch)}
+                  title={pickedBranch ? `Switch to ${pickedBranch}` : 'Pick a branch first'}
+                >
+                  {branchOp ? <RefreshCw className="h-3 w-3 animate-spin" /> : 'Switch'}
+                </Button>
+              </>
             )}
             <Button
               variant="ghost"

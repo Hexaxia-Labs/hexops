@@ -234,16 +234,19 @@ export function ProjectDetail({
     }
   }, [project.id]);
 
-  // Poll metrics every 5 seconds when running, fetch git/project/vercel info on mount
+  // Poll metrics every 5 seconds when running, fetch git/project/vercel info on mount.
+  // Poll git info every 10s to catch external branch switches (terminal, IDE).
   useEffect(() => {
     fetchMetrics();
     fetchGitInfo();
     fetchProjectInfo();
     fetchVercelInfo();
+    const gitInterval = setInterval(fetchGitInfo, 10000);
     if (isRunning) {
       const interval = setInterval(fetchMetrics, 5000);
-      return () => clearInterval(interval);
+      return () => { clearInterval(interval); clearInterval(gitInterval); };
     }
+    return () => clearInterval(gitInterval);
   }, [isRunning, fetchMetrics, fetchGitInfo, fetchProjectInfo, fetchVercelInfo]);
 
   const handleStart = async (mode: 'dev' | 'prod' = 'dev') => {
@@ -1178,7 +1181,7 @@ export function ProjectDetail({
         </CollapsibleSection>
 
         <CollapsibleSection title="Git">
-          <GitSection projectId={project.id} projectPath={project.path} />
+          <GitSection projectId={project.id} projectPath={project.path} onBranchChange={fetchGitInfo} />
         </CollapsibleSection>
 
         <CollapsibleSection title="Package Health">
