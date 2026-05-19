@@ -6,6 +6,17 @@ import { writeSecurityCache } from './persistence';
 const DEFAULT_TIMEOUT_MS = 60_000;
 const inflight = new Map<string, Promise<ScanResult>>();
 
+/**
+ * Races a promise against a deadline.
+ *
+ * NOTE: When the timeout fires, the underlying promise `p` continues
+ * executing in the background until natural completion — there is no
+ * AbortSignal plumbing here. Sources that spawn child processes (e.g. Grype
+ * shelling out to a binary) must give those processes their own internal
+ * timeout (e.g. the `timeout` option on `execAsync`) so they don't outlive
+ * the runner's deadline. The runner timeout is a safety net, not a kill
+ * switch.
+ */
 async function withTimeout<T>(p: Promise<T>, ms: number): Promise<{ ok: true; value: T } | { ok: false }> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<{ ok: false }>((resolve) => {
