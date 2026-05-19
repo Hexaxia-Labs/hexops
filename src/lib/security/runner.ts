@@ -1,0 +1,102 @@
+import type { ProjectConfig } from '../types';
+import type { Finding, ScanResult, ScanSource, SourceResult, SourceStatus } from './types';
+import { mergeFindings } from './merger';
+import { writeSecurityCache } from './persistence';
+
+const DEFAULT_TIMEOUT_MS = 60_000;
+const inflight = new Map<string, Promise<ScanResult>>();
+
+async function withTimeout<T>(p: Promise<T>, ms: number): Promise<{ ok: true; value: T } | { ok: false }> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<{ ok: false }>((resolve) => {
+    timer = setTimeout(() => resolve({ ok: false }), ms);
+  });
+  const winner = await Promise.race([p.then((value) => ({ ok: true as const, value })), timeout]);
+  if (timer) clearTimeout(timer);
+  return winner;
+}
+
+async function runOne(source: ScanSource, project: ProjectConfig): Promise<{ result: SourceResult; findings: Finding[] }> {
+  const startedAt = new Date().toISOString();
+  const start = Date.now();
+  let status: SourceStatus = 'ok';
+  let error: string | undefined;
+  let findings: Finding[] = [];
+
+  const available = await source.isAvailable().catch(() => false);
+  if (!available) {
+    status = 'unavailable';
+  } else {
+    const timeout = source.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const outcome = await withTimeout(source.scan(project), timeout).catch((err) => {
+      error = err instanceof Error ? err.message : String(err);
+      status = 'failed';
+      return { ok: false } as const;
+    });
+    if (status === 'ok' && 'ok' in outcome && outcome.ok) {
+      findings = outcome.value;
+    } else if (status === 'ok') {
+      status = 'timeout';
+    }
+  }
+
+  return {
+    findings,
+    result: {
+      id: source.id,
+      status,
+      startedAt,
+      durationMs: Date.now() - start,
+      findingCount: findings.length,
+      error,
+    },
+  };
+}
+
+export async function scanProjectWithSources(project: ProjectConfig, sources: ScanSource[]): Promise<ScanResult> {
+  const existing = inflight.get(project.id);
+  if (existing) return existing;
+
+  const promise = (async () => {
+    const start = Date.now();
+    const perSource = new Map<string, Finding[]>();
+    const sourcesRecord: Record<string, SourceResult> = {};
+
+    await Promise.all(sources.map(async (s) => {
+      try {
+        const { result, findings } = await runOne(s, project);
+        sourcesRecord[s.id] = result;
+        perSource.set(s.id, findings);
+      } catch (err) {
+        sourcesRecord[s.id] = {
+          id: s.id,
+          status: 'failed',
+          startedAt: new Date().toISOString(),
+          durationMs: 0,
+          findingCount: 0,
+          error: err instanceof Error ? err.message : String(err),
+        };
+        perSource.set(s.id, []);
+      }
+    }));
+
+    const findings = mergeFindings(perSource);
+    const result: ScanResult = {
+      cacheVersion: 1,
+      projectId: project.id,
+      timestamp: new Date().toISOString(),
+      durationMs: Date.now() - start,
+      sources: sourcesRecord,
+      findings,
+    };
+    writeSecurityCache(project.id, result);
+    return result;
+  })();
+
+  inflight.set(project.id, promise);
+  try {
+    return await promise;
+  } finally {
+    inflight.delete(project.id);
+  }
+}
