@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeDedupKey } from './merger';
+import { computeDedupKey, mergeFindings } from './merger';
 import type { Finding } from './types';
 
 function f(overrides: Partial<Finding>): Finding {
@@ -51,5 +51,65 @@ describe('computeDedupKey', () => {
   it('config: keys on path|ruleId', () => {
     expect(computeDedupKey(f({ type: 'config', path: 'tsconfig.json', title: 'no-strict' })))
       .toBe('config:tsconfig.json|no-strict');
+  });
+});
+
+describe('mergeFindings', () => {
+  it('returns a single finding tagged with both sources when keys match', () => {
+    const a: Finding = f({ advisoryIds: ['GHSA-x'], package: 'next', version: '16.0.0', severity: 'high', sources: ['pnpm-audit'], rawBySource: { 'pnpm-audit': { hello: 1 } } });
+    const b: Finding = f({ advisoryIds: ['GHSA-x'], package: 'next', version: '16.0.0', severity: 'critical', sources: ['grype'], rawBySource: { grype: { hello: 2 } } });
+    const merged = mergeFindings(new Map([['pnpm-audit', [a]], ['grype', [b]]]));
+    expect(merged).toHaveLength(1);
+    expect(merged[0].sources.sort()).toEqual(['grype', 'pnpm-audit']);
+    expect(merged[0].rawBySource).toEqual({ 'pnpm-audit': { hello: 1 }, grype: { hello: 2 } });
+  });
+
+  it('takes the highest severity across sources', () => {
+    const a = f({ advisoryIds: ['GHSA-y'], severity: 'low' });
+    const b = f({ advisoryIds: ['GHSA-y'], severity: 'critical' });
+    const [m] = mergeFindings(new Map([['s1', [a]], ['s2', [b]]]));
+    expect(m.severity).toBe('critical');
+  });
+
+  it('flags divergence when severity differs by more than one level', () => {
+    const a = f({ advisoryIds: ['GHSA-z'], severity: 'low' });
+    const b = f({ advisoryIds: ['GHSA-z'], severity: 'critical' });
+    const [m] = mergeFindings(new Map([['s1', [a]], ['s2', [b]]]));
+    expect(m.divergent).toBe(true);
+  });
+
+  it('does not flag divergence when severity differs by one level', () => {
+    const a = f({ advisoryIds: ['GHSA-z2'], severity: 'medium' });
+    const b = f({ advisoryIds: ['GHSA-z2'], severity: 'high' });
+    const [m] = mergeFindings(new Map([['s1', [a]], ['s2', [b]]]));
+    expect(m.divergent).toBeFalsy();
+  });
+
+  it('takes max cvss when present', () => {
+    const a = f({ advisoryIds: ['GHSA-c'], cvss: 4.5 });
+    const b = f({ advisoryIds: ['GHSA-c'], cvss: 9.8 });
+    const [m] = mergeFindings(new Map([['s1', [a]], ['s2', [b]]]));
+    expect(m.cvss).toBe(9.8);
+  });
+
+  it('preserves source-only findings, tagged with the lone source', () => {
+    const a = f({ advisoryIds: ['GHSA-only-in-grype'], sources: ['grype'] });
+    const merged = mergeFindings(new Map([['pnpm-audit', []], ['grype', [a]]]));
+    expect(merged).toHaveLength(1);
+    expect(merged[0].sources).toEqual(['grype']);
+  });
+
+  it('unions advisoryIds across sources', () => {
+    const a = f({ advisoryIds: ['GHSA-aliased', 'CVE-2024-9'] });
+    const b = f({ advisoryIds: ['GHSA-aliased', 'CVE-2024-10'] });
+    const [m] = mergeFindings(new Map([['s1', [a]], ['s2', [b]]]));
+    expect(m.advisoryIds.sort()).toEqual(['CVE-2024-10', 'CVE-2024-9', 'GHSA-aliased']);
+  });
+
+  it('unions references across sources', () => {
+    const a = f({ advisoryIds: ['GHSA-r'], references: ['https://a'] });
+    const b = f({ advisoryIds: ['GHSA-r'], references: ['https://b'] });
+    const [m] = mergeFindings(new Map([['s1', [a]], ['s2', [b]]]));
+    expect(m.references.sort()).toEqual(['https://a', 'https://b']);
   });
 });
