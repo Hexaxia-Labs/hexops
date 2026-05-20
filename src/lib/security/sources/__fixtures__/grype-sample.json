@@ -1,0 +1,87 @@
+{
+  "matches": [
+    {
+      "vulnerability": {
+        "id": "CVE-2023-1234",
+        "severity": "High",
+        "description": "A high severity buffer overflow vulnerability in libfoo.",
+        "fix": {
+          "state": "fixed",
+          "versions": ["2.1.0"]
+        },
+        "cvss": [
+          {
+            "metrics": {
+              "baseScore": 8.1
+            }
+          }
+        ],
+        "urls": [
+          "https://nvd.nist.gov/vuln/detail/CVE-2023-1234"
+        ]
+      },
+      "relatedVulnerabilities": [
+        { "id": "GHSA-abcd-1234-efgh" }
+      ],
+      "artifact": {
+        "name": "libfoo",
+        "version": "2.0.3",
+        "locations": [
+          { "path": "/usr/lib/libfoo.so" }
+        ]
+      }
+    },
+    {
+      "vulnerability": {
+        "id": "CVE-2023-5678",
+        "severity": "Critical",
+        "description": "Remote code execution in libbar allows unauthenticated attackers to run arbitrary commands.",
+        "fix": {
+          "state": "not-fixed",
+          "versions": []
+        },
+        "cvss": [],
+        "urls": [
+          "https://nvd.nist.gov/vuln/detail/CVE-2023-5678",
+          "https://github.com/advisories/GHSA-xxxx-0000-yyyy"
+        ]
+      },
+      "relatedVulnerabilities": [],
+      "artifact": {
+        "name": "libbar",
+        "version": "1.5.0",
+        "locations": [
+          { "path": "/usr/lib/libbar.so" }
+        ]
+      }
+    },
+    {
+      "vulnerability": {
+        "id": "CVE-2023-9012",
+        "severity": "Medium",
+        "description": "Denial of service via malformed input in libqux.",
+        "fix": {
+          "state": "wont-fix",
+          "versions": []
+        },
+        "cvss": [
+          {
+            "metrics": {
+              "baseScore": 5.3
+            }
+          }
+        ],
+        "urls": []
+      },
+      "relatedVulnerabilities": [
+        { "id": "GHSA-qqqq-3333-rrrr" },
+        { "id": "GHSA-ssss-4444-tttt" }
+      ],
+      "artifact": {
+        "name": "libqux",
+        "version": "3.2.1",
+        "locations": []
+      }
+    }
+  ]
+}
