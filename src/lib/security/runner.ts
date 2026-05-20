@@ -2,6 +2,7 @@ import type { ProjectConfig } from '../types';
 import type { Finding, ScanResult, ScanSource, SourceResult, SourceStatus } from './types';
 import { mergeFindings } from './merger';
 import { writeSecurityCache } from './persistence';
+import { SOURCES } from './sources';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const inflight = new Map<string, Promise<ScanResult>>();
@@ -110,4 +111,8 @@ export async function scanProjectWithSources(project: ProjectConfig, sources: Sc
   } finally {
     inflight.delete(project.id);
   }
+}
+
+export async function scanProject(project: ProjectConfig): Promise<ScanResult> {
+  return scanProjectWithSources(project, SOURCES);
 }
