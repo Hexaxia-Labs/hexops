@@ -1,6 +1,7 @@
 import { getProjects } from './config';
 import { getGlobalSettings } from './settings';
 import { scanProject } from './patch-scanner';
+import { scanProject as runSecurityScan } from './security/runner';
 import { readPatchState, writePatchState } from './patch-storage';
 import { logger } from './logger';
 import { addNotification } from './notifications';
@@ -40,6 +41,12 @@ async function runScan() {
             });
           }
         }
+        // security scan — feeds the merged-findings used by the Patches page nested-dep verification
+        await runSecurityScan(project).catch((err) => {
+          logger.error('system', 'security_scan:project_error', `Security scan failed for ${project.id}`, {
+            meta: { error: err instanceof Error ? err.message : String(err) },
+          });
+        });
       } catch (err) {
         logger.error('system', 'scheduled_scan:project_error', `Failed to scan ${project.id}`, {
           meta: { error: err instanceof Error ? err.message : String(err) },
