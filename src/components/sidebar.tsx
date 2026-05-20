@@ -148,6 +148,17 @@ export function Sidebar({
         </Link>
 
         <Link
+          href="/security/cve-lite"
+          className={cn(
+            'w-full text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center gap-2',
+            'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50'
+          )}
+        >
+          <ShieldCheck className="h-4 w-4" />
+          <span>CVE Lite</span>
+        </Link>
+
+        <Link
           href="/logs"
           className={cn(
             'w-full text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center gap-2',
