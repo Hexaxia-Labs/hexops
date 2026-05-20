@@ -112,4 +112,20 @@ describe('mergeFindings', () => {
     const [m] = mergeFindings(new Map([['s1', [a]], ['s2', [b]]]));
     expect(m.references.sort()).toEqual(['https://a', 'https://b']);
   });
+
+  it('merges findings that share any advisory id even when canonical keys differ (postcss #80 case)', () => {
+    const pnpm = f({ package: 'postcss', version: '8.4.31', severity: 'medium', advisoryIds: ['CVE-2026-41305', '1117015'], sources: ['pnpm-audit'] });
+    const grype = f({ package: 'postcss', version: '8.4.31', severity: 'medium', advisoryIds: ['GHSA-qx2v-qp2m-jg93', 'CVE-2026-41305'], sources: ['grype'] });
+    const merged = mergeFindings(new Map([['pnpm-audit', [pnpm]], ['grype', [grype]]]));
+    expect(merged).toHaveLength(1);
+    expect(merged[0].sources.sort()).toEqual(['grype', 'pnpm-audit']);
+    expect(merged[0].advisoryIds.sort()).toEqual(['1117015', 'CVE-2026-41305', 'GHSA-qx2v-qp2m-jg93']);
+  });
+
+  it('keeps distinct vulnerabilities separate when they share no advisory id', () => {
+    const a = f({ package: 'x', advisoryIds: ['CVE-1'], sources: ['s1'] });
+    const b = f({ package: 'y', advisoryIds: ['CVE-2'], sources: ['s2'] });
+    const merged = mergeFindings(new Map([['s1', [a]], ['s2', [b]]]));
+    expect(merged).toHaveLength(2);
+  });
 });

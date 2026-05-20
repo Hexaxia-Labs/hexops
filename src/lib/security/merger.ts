@@ -31,8 +31,25 @@ function uniq<T>(xs: T[]): T[] {
   return Array.from(new Set(xs));
 }
 
+function mergeTwo(existing: Finding, incoming: Finding): Finding {
+  const minRank = Math.min(SEVERITY_RANK[existing.severity], SEVERITY_RANK[incoming.severity]);
+  const maxRank = Math.max(SEVERITY_RANK[existing.severity], SEVERITY_RANK[incoming.severity]);
+  return {
+    ...existing,
+    sources: uniq([...existing.sources, ...incoming.sources]),
+    rawBySource: { ...existing.rawBySource, ...incoming.rawBySource },
+    severity: maxSeverity(existing.severity, incoming.severity),
+    cvss: Math.max(existing.cvss ?? 0, incoming.cvss ?? 0) || undefined,
+    advisoryIds: uniq([...existing.advisoryIds, ...incoming.advisoryIds]),
+    references: uniq([...existing.references, ...incoming.references]),
+    fixedIn: existing.fixedIn ?? incoming.fixedIn,
+    divergent: (maxRank - minRank) > 1 ? true : existing.divergent,
+  };
+}
+
 export function mergeFindings(perSource: Map<string, Finding[]>): Finding[] {
   const byKey = new Map<string, Finding>();
+  const aliasToKey = new Map<string, string>(); // advisoryId -> canonical group key
 
   for (const [sourceId, findings] of perSource) {
     for (const raw of findings) {
@@ -41,28 +58,29 @@ export function mergeFindings(perSource: Map<string, Finding[]>): Finding[] {
         sources: uniq([...(raw.sources ?? []), sourceId]),
         rawBySource: { ...(raw.rawBySource ?? {}), [sourceId]: raw.rawBySource?.[sourceId] ?? raw },
       };
-      tagged.dedupKey = computeDedupKey(tagged);
 
-      const existing = byKey.get(tagged.dedupKey);
-      if (!existing) {
-        byKey.set(tagged.dedupKey, tagged);
-        continue;
+      // For vulnerability findings, look up any shared advisory id to find an
+      // existing group before falling back to computeDedupKey. This handles
+      // the case where two scanners report the same vuln with overlapping but
+      // non-identical advisory id sets (e.g. pnpm-audit has CVE-X but no GHSA,
+      // grype has GHSA-Y and CVE-X — they share CVE-X so must merge).
+      let groupKey: string | undefined;
+      for (const id of tagged.advisoryIds) {
+        const hit = aliasToKey.get(id);
+        if (hit) { groupKey = hit; break; }
       }
+      if (!groupKey) groupKey = computeDedupKey(tagged);
+      tagged.dedupKey = groupKey;
 
-      const minRank = Math.min(SEVERITY_RANK[existing.severity], SEVERITY_RANK[tagged.severity]);
-      const maxRank = Math.max(SEVERITY_RANK[existing.severity], SEVERITY_RANK[tagged.severity]);
-      const merged: Finding = {
-        ...existing,
-        sources: uniq([...existing.sources, ...tagged.sources]),
-        rawBySource: { ...existing.rawBySource, ...tagged.rawBySource },
-        severity: maxSeverity(existing.severity, tagged.severity),
-        cvss: Math.max(existing.cvss ?? 0, tagged.cvss ?? 0) || undefined,
-        advisoryIds: uniq([...existing.advisoryIds, ...tagged.advisoryIds]),
-        references: uniq([...existing.references, ...tagged.references]),
-        fixedIn: existing.fixedIn ?? tagged.fixedIn,
-        divergent: (maxRank - minRank) > 1 ? true : existing.divergent,
-      };
-      byKey.set(merged.dedupKey, merged);
+      const existing = byKey.get(groupKey);
+      const finalFinding = existing ? mergeTwo(existing, tagged) : tagged;
+      byKey.set(groupKey, finalFinding);
+
+      // Register all advisory ids of the merged finding as aliases for this group
+      // so subsequent findings can join via any shared id.
+      for (const id of finalFinding.advisoryIds) {
+        aliasToKey.set(id, groupKey);
+      }
     }
   }
 
