@@ -30,6 +30,35 @@ import { readSecurityCache } from './security/persistence';
 const execAsync = promisify(exec);
 
 /**
+ * Resolve the installed version of a package by checking the paths npm audit
+ * actually flagged (`nodes`), then falling back to the top-level node_modules.
+ *
+ * npm audit reports the specific nested copy that is vulnerable in `vuln.nodes`
+ * (e.g. `["node_modules/next/node_modules/postcss"]`). For transitive deps the
+ * top-level copy is often a different (patched) version, so reading it would
+ * mask the real vulnerable version. Reading from the flagged path is more
+ * accurate and makes the stale-vuln filter behave correctly.
+ */
+export function resolveInstalledVersion(
+  projectPath: string,
+  name: string,
+  nodes?: string[],
+): string | undefined {
+  const candidates = [
+    ...((nodes ?? []).map((n) => join(projectPath, n, 'package.json'))),
+    join(projectPath, 'node_modules', name, 'package.json'),
+  ];
+  for (const p of candidates) {
+    if (existsSync(p)) {
+      try {
+        return (JSON.parse(readFileSync(p, 'utf-8')).version) as string;
+      } catch { /* try next candidate */ }
+    }
+  }
+  return undefined;
+}
+
+/**
  * Returns true if version a >= b (major.minor.patch).
  * Non-numeric/missing parts treated as 0. Strips leading ^~.
  */
@@ -387,17 +416,13 @@ export async function runPnpmAudit(
         fixAvailable: boolean | { name: string; version: string; isSemVerMajor?: boolean };
         isDirect: boolean;
         effects?: string[];
+        nodes?: string[];
       };
 
-      // Read installed version from node_modules when not provided in audit output
-      let currentVersion: string | undefined;
-      try {
-        const pkgJsonPath = join(projectPath, 'node_modules', name, 'package.json');
-        if (existsSync(pkgJsonPath)) {
-          const pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
-          currentVersion = pkgJson.version;
-        }
-      } catch { /* ignore - package may not be installed locally */ }
+      // Read installed version from the path npm audit flagged (vuln.nodes[0]) so
+      // we get the nested vulnerable copy rather than the (possibly patched) top-level.
+      // Falls back to top-level node_modules/<name> when nodes is absent/empty or missing.
+      const currentVersion = resolveInstalledVersion(projectPath, name, vuln.nodes);
 
       // Extract title and advisory info from via (can be string or object with title)
       let title = 'Vulnerability';
