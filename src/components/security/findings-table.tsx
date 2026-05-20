@@ -27,6 +27,8 @@ export function FindingsTable({ projectId, findings }: Props) {
             <td className="text-zinc-200">
               {f.title}
               {f.divergent && <span className="ml-2 text-yellow-400" title="Sources disagree on severity by >1 level">⚠ divergent</span>}
+              {f.reachable === true && <span className="ml-2 px-1 py-0.5 text-[9px] rounded border border-amber-700 text-amber-300 bg-amber-900/20" title="Statically detected as imported in your code">reachable</span>}
+              {f.reachable === false && <span className="ml-2 px-1 py-0.5 text-[9px] rounded border border-zinc-700 text-zinc-500" title="Not detected as imported (reachability is best-effort; not hidden)">not imported</span>}
             </td>
             <td><SeverityBadge severity={f.severity} /></td>
             <td>
@@ -35,7 +37,9 @@ export function FindingsTable({ projectId, findings }: Props) {
               </span>
             </td>
             <td>
-              {f.fixedIn ? (
+              {f.remediation?.runnableFixCommand ? (
+                <code className="text-[11px] text-green-300 bg-green-900/15 border border-green-800 rounded px-1.5 py-0.5" title={f.remediation.recommendedAction ?? f.remediation.runnableFixCommand}>{f.remediation.runnableFixCommand}</code>
+              ) : f.fixedIn ? (
                 <Link className="text-blue-400 hover:underline text-xs" href={`/patches?project=${projectId}&pkg=${encodeURIComponent(f.package ?? '')}`}>Fix → {f.fixedIn}</Link>
               ) : <span className="text-zinc-600">—</span>}
             </td>
