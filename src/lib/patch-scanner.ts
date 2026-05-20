@@ -300,6 +300,250 @@ export async function scanOutdated(
 }
 
 /**
+ * Runs `<pm> audit --json` for a project and returns parsed vulnerabilities.
+ * Pulled out of scanProject so other surfaces (the security ScanSource) can
+ * reuse the same invocation without spawning a second audit run.
+ */
+export async function runPnpmAudit(
+  projectPath: string,
+  pm: PackageManager,
+): Promise<{ vulnerabilities: VulnerabilityInfo[]; raw: unknown }> {
+  let output = '';
+  const cmd = pm === 'pnpm'
+    ? 'pnpm audit --json'
+    : pm === 'npm'
+    ? 'npm audit --json'
+    : 'yarn audit --json';
+
+  try {
+    const { stdout } = await execAsync(cmd, { cwd: projectPath, timeout: 30000 });
+    output = stdout;
+  } catch (err: unknown) {
+    const execErr = err as { stdout?: string; killed?: boolean };
+    if (execErr.killed) {
+      console.warn(`Timeout scanning vulnerabilities for ${projectPath}`);
+      return { vulnerabilities: [], raw: {} };
+    }
+    output = execErr.stdout || '{}';
+  }
+
+  // pnpm/npm may output warnings before JSON - extract only the JSON portion
+  const jsonStart = output.search(/[\[{]/);
+  const jsonOutput = jsonStart >= 0 ? output.slice(jsonStart) : '{}';
+  const data = JSON.parse(jsonOutput);
+  const result: VulnerabilityInfo[] = [];
+
+  // pnpm/npm advisories format
+  if (data.advisories) {
+    for (const advisory of Object.values(data.advisories)) {
+      const adv = advisory as {
+        module_name: string;
+        severity: string;
+        title: string;
+        findings: Array<{ version?: string; paths: string[] }>;
+        patched_versions: string;
+        cves?: string[];
+        url?: string;
+        id?: number;
+      };
+      const depPath = adv.findings?.[0]?.paths?.[0] || adv.module_name;
+      const pathParts = depPath.split('>').map(s => s.trim());
+      const currentVersion = adv.findings?.[0]?.version;
+      // A path like ".>next" means next is a direct dep of the root project (.)
+      // Only treat as transitive if the chain has >1 real package (not just ".")
+      const realParts = pathParts.filter(p => p !== '.');
+      const isTransitive = realParts.length > 1;
+      // Extract fix version from patched_versions (e.g., ">=16.1.5" -> "16.1.5")
+      const fixVersion = adv.patched_versions?.match(/[\d.]+/)?.[0];
+      const hasPatch = adv.patched_versions !== '<0.0.0';
+
+      result.push({
+        name: adv.module_name,
+        severity: adv.severity as VulnSeverity,
+        title: adv.title,
+        path: depPath,
+        // Transitive deps are always actionable via override
+        fixAvailable: isTransitive ? true : hasPatch,
+        fixVersion: isTransitive ? (fixVersion || 'resolve-latest') : fixVersion,
+        currentVersion,
+        isDirect: !isTransitive,
+        via: isTransitive ? pathParts : undefined,
+        parentPackage: isTransitive ? pathParts[0] : undefined,
+        fixViaOverride: isTransitive || undefined,
+        cves: adv.cves?.length ? adv.cves : undefined,
+        url: adv.url,
+        advisoryId: adv.id,
+      });
+    }
+  }
+
+  // npm v7+ vulnerabilities format
+  if (data.vulnerabilities) {
+    for (const [name, info] of Object.entries(data.vulnerabilities)) {
+      const vuln = info as {
+        severity: string;
+        via: Array<string | { title?: string; source?: number; url?: string; cwe?: string[]; range?: string }>;
+        fixAvailable: boolean | { name: string; version: string; isSemVerMajor?: boolean };
+        isDirect: boolean;
+        effects?: string[];
+      };
+
+      // Read installed version from node_modules when not provided in audit output
+      let currentVersion: string | undefined;
+      try {
+        const pkgJsonPath = join(projectPath, 'node_modules', name, 'package.json');
+        if (existsSync(pkgJsonPath)) {
+          const pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
+          currentVersion = pkgJson.version;
+        }
+      } catch { /* ignore - package may not be installed locally */ }
+
+      // Extract title and advisory info from via (can be string or object with title)
+      let title = 'Vulnerability';
+      let advisoryId: number | undefined;
+      let url: string | undefined;
+      const viaWithTitle = vuln.via?.find(v => typeof v === 'object' && v.title);
+      if (viaWithTitle && typeof viaWithTitle === 'object') {
+        title = viaWithTitle.title || title;
+        advisoryId = viaWithTitle.source;
+        url = viaWithTitle.url || (advisoryId ? `https://github.com/advisories/GHSA-${advisoryId}` : undefined);
+      }
+
+      // Build dependency chain from via field
+      const viaChain = vuln.via?.filter(v => typeof v === 'string') as string[];
+
+      // Determine parent package (the direct dep that pulls in this transitive)
+      // For transitive deps, the parent is in the effects chain or via chain
+      let parentPackage: string | undefined;
+      if (!vuln.isDirect && viaChain?.length > 0) {
+        parentPackage = viaChain[0]; // First string in via is typically the parent
+      }
+
+      // Determine fix availability and version
+      let fixAvailable = !!vuln.fixAvailable;
+      let fixVersion: string | undefined;
+      let isBreakingFix = false;
+      let fixViaOverride = false;
+      let fixByParent: { name: string; version: string } | undefined;
+
+      if (typeof vuln.fixAvailable === 'object') {
+        isBreakingFix = vuln.fixAvailable.isSemVerMajor === true;
+
+        if (vuln.isDirect || vuln.fixAvailable.name === name) {
+          // Direct dep or self-referencing fix — update this package directly
+          fixVersion = vuln.fixAvailable.version;
+        } else if (!vuln.isDirect) {
+          // Transitive dep — fixAvailable points to the parent package to update.
+          // Preferred strategy: update the parent dependency directly.
+          fixByParent = { name: vuln.fixAvailable.name, version: vuln.fixAvailable.version };
+        }
+      }
+
+      // Direct deps: always allow patching — breaking updates show a warning but are still actionable
+      if (vuln.isDirect) {
+        if (!fixVersion && fixAvailable) {
+          fixVersion = 'latest';
+        }
+      }
+
+      // Transitive deps: determine fix strategy.
+      // Also covers self-advisory packages (e.g. hono) where via[] contains only advisory
+      // objects (no string parent references), so parentPackage is undefined but the vuln
+      // IS in this package itself and needs a direct override.
+      if (!vuln.isDirect && (parentPackage || !fixVersion)) {
+        if (fixByParent && !isBreakingFix) {
+          // Best path: update the parent dependency (non-breaking)
+          fixAvailable = true;
+          fixVersion = fixByParent.version;
+        } else {
+          // Fallback: apply a package manager override for this package directly.
+          // Extract fix version from advisory range in via objects (works for both
+          // "via parent" cases and self-advisory packages like hono).
+          let overrideVersion: string | undefined;
+          const viaAdvisories = vuln.via?.filter(v => typeof v === 'object' && v.range) as
+            Array<{ range: string }> | undefined;
+
+          if (viaAdvisories?.length) {
+            const fixVersions: string[] = [];
+            for (const adv of viaAdvisories) {
+              const upperBounds = adv.range.match(/<(\d+\.\d+\.\d+)/g);
+              if (upperBounds) {
+                for (const bound of upperBounds) {
+                  fixVersions.push(bound.slice(1));
+                }
+              }
+            }
+
+            if (fixVersions.length > 0 && currentVersion) {
+              const currentMajor = parseInt(currentVersion.split('.')[0], 10);
+              const sameMajorFix = fixVersions.find(v => parseInt(v.split('.')[0], 10) === currentMajor);
+              overrideVersion = sameMajorFix || fixVersions[fixVersions.length - 1];
+            } else if (fixVersions.length > 0) {
+              overrideVersion = fixVersions[fixVersions.length - 1];
+            }
+          }
+
+          fixAvailable = true;
+          fixVersion = overrideVersion || 'resolve-latest';
+          fixViaOverride = true;
+
+          // If the parent update exists but is breaking, keep the reference for display
+          if (fixByParent && isBreakingFix) {
+            // fixByParent preserved so UI can show the alternative
+          } else {
+            fixByParent = undefined;
+          }
+        }
+      }
+
+      // Self-advisory: not a direct dep, advisory is on the package itself (no string
+      // parents in via[]), but fixVersion was resolved directly from the advisory range.
+      // Must go through the override mechanism — it can't be updated as a direct dep.
+      if (!vuln.isDirect && !parentPackage && !viaChain?.length && fixVersion && !fixViaOverride) {
+        fixViaOverride = true;
+      }
+
+      result.push({
+        name,
+        severity: vuln.severity as VulnSeverity,
+        title,
+        path: name,
+        fixAvailable,
+        fixVersion,
+        currentVersion,
+        isDirect: vuln.isDirect ?? true,
+        via: viaChain?.length > 0 ? viaChain : undefined,
+        parentPackage,
+        parentAtLatest: isBreakingFix,
+        fixViaOverride: fixViaOverride || undefined,
+        fixByParent,
+        isBreakingFix: isBreakingFix || undefined,
+        advisoryId,
+        url,
+      });
+    }
+  }
+
+  // Drop entries where the fix version is older than the currently installed version.
+  // This happens when npm audit references an advisory whose patched_versions only
+  // covers an older major (e.g. next <9.3.3 advisory while installed is 16.2.4).
+  // The package is already beyond the vulnerable range — no action needed.
+  //
+  // Exception: fixViaOverride entries must NOT be filtered by the top-level installed
+  // version. The vulnerable copy is nested (e.g. next/node_modules/postcss @8.4.31)
+  // while the top-level version may already be patched. npm audit is the authoritative
+  // source — if it still reports the vuln, the override hasn't been applied yet.
+  const vulnerabilities = result.filter(vuln => {
+    if (!vuln.fixVersion || !vuln.currentVersion) return true;
+    if (vuln.fixVersion === 'latest' || vuln.fixVersion === 'resolve-latest') return true;
+    if (vuln.fixViaOverride) return true;
+    return !semverGte(vuln.currentVersion, vuln.fixVersion);
+  });
+
+  return { vulnerabilities, raw: data };
+}
+
+/**
  * Scan a project for vulnerabilities
  */
 export async function scanVulnerabilities(
@@ -308,237 +552,8 @@ export async function scanVulnerabilities(
   const pm = detectPackageManager(project.path);
 
   try {
-    let output = '';
-    const cmd = pm === 'pnpm'
-      ? 'pnpm audit --json'
-      : pm === 'npm'
-      ? 'npm audit --json'
-      : 'yarn audit --json';
-
-    try {
-      const { stdout } = await execAsync(cmd, { cwd: project.path, timeout: 30000 });
-      output = stdout;
-    } catch (err: unknown) {
-      const execErr = err as { stdout?: string; killed?: boolean };
-      if (execErr.killed) {
-        console.warn(`Timeout scanning vulnerabilities for ${project.id}`);
-        return [];
-      }
-      output = execErr.stdout || '{}';
-    }
-
-    // pnpm/npm may output warnings before JSON - extract only the JSON portion
-    const jsonStart = output.search(/[\[{]/);
-    const jsonOutput = jsonStart >= 0 ? output.slice(jsonStart) : '{}';
-    const data = JSON.parse(jsonOutput);
-    const result: VulnerabilityInfo[] = [];
-
-    // pnpm/npm advisories format
-    if (data.advisories) {
-      for (const advisory of Object.values(data.advisories)) {
-        const adv = advisory as {
-          module_name: string;
-          severity: string;
-          title: string;
-          findings: Array<{ version?: string; paths: string[] }>;
-          patched_versions: string;
-          cves?: string[];
-          url?: string;
-          id?: number;
-        };
-        const depPath = adv.findings?.[0]?.paths?.[0] || adv.module_name;
-        const pathParts = depPath.split('>').map(s => s.trim());
-        const currentVersion = adv.findings?.[0]?.version;
-        // A path like ".>next" means next is a direct dep of the root project (.)
-        // Only treat as transitive if the chain has >1 real package (not just ".")
-        const realParts = pathParts.filter(p => p !== '.');
-        const isTransitive = realParts.length > 1;
-        // Extract fix version from patched_versions (e.g., ">=16.1.5" -> "16.1.5")
-        const fixVersion = adv.patched_versions?.match(/[\d.]+/)?.[0];
-        const hasPatch = adv.patched_versions !== '<0.0.0';
-
-        result.push({
-          name: adv.module_name,
-          severity: adv.severity as VulnSeverity,
-          title: adv.title,
-          path: depPath,
-          // Transitive deps are always actionable via override
-          fixAvailable: isTransitive ? true : hasPatch,
-          fixVersion: isTransitive ? (fixVersion || 'resolve-latest') : fixVersion,
-          currentVersion,
-          isDirect: !isTransitive,
-          via: isTransitive ? pathParts : undefined,
-          parentPackage: isTransitive ? pathParts[0] : undefined,
-          fixViaOverride: isTransitive || undefined,
-          cves: adv.cves?.length ? adv.cves : undefined,
-          url: adv.url,
-          advisoryId: adv.id,
-        });
-      }
-    }
-
-    // npm v7+ vulnerabilities format
-    if (data.vulnerabilities) {
-      for (const [name, info] of Object.entries(data.vulnerabilities)) {
-        const vuln = info as {
-          severity: string;
-          via: Array<string | { title?: string; source?: number; url?: string; cwe?: string[]; range?: string }>;
-          fixAvailable: boolean | { name: string; version: string; isSemVerMajor?: boolean };
-          isDirect: boolean;
-          effects?: string[];
-        };
-
-        // Read installed version from node_modules when not provided in audit output
-        let currentVersion: string | undefined;
-        try {
-          const pkgJsonPath = join(project.path, 'node_modules', name, 'package.json');
-          if (existsSync(pkgJsonPath)) {
-            const pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
-            currentVersion = pkgJson.version;
-          }
-        } catch { /* ignore - package may not be installed locally */ }
-
-        // Extract title and advisory info from via (can be string or object with title)
-        let title = 'Vulnerability';
-        let advisoryId: number | undefined;
-        let url: string | undefined;
-        const viaWithTitle = vuln.via?.find(v => typeof v === 'object' && v.title);
-        if (viaWithTitle && typeof viaWithTitle === 'object') {
-          title = viaWithTitle.title || title;
-          advisoryId = viaWithTitle.source;
-          url = viaWithTitle.url || (advisoryId ? `https://github.com/advisories/GHSA-${advisoryId}` : undefined);
-        }
-
-        // Build dependency chain from via field
-        const viaChain = vuln.via?.filter(v => typeof v === 'string') as string[];
-
-        // Determine parent package (the direct dep that pulls in this transitive)
-        // For transitive deps, the parent is in the effects chain or via chain
-        let parentPackage: string | undefined;
-        if (!vuln.isDirect && viaChain?.length > 0) {
-          parentPackage = viaChain[0]; // First string in via is typically the parent
-        }
-
-        // Determine fix availability and version
-        let fixAvailable = !!vuln.fixAvailable;
-        let fixVersion: string | undefined;
-        let isBreakingFix = false;
-        let fixViaOverride = false;
-        let fixByParent: { name: string; version: string } | undefined;
-
-        if (typeof vuln.fixAvailable === 'object') {
-          isBreakingFix = vuln.fixAvailable.isSemVerMajor === true;
-
-          if (vuln.isDirect || vuln.fixAvailable.name === name) {
-            // Direct dep or self-referencing fix — update this package directly
-            fixVersion = vuln.fixAvailable.version;
-          } else if (!vuln.isDirect) {
-            // Transitive dep — fixAvailable points to the parent package to update.
-            // Preferred strategy: update the parent dependency directly.
-            fixByParent = { name: vuln.fixAvailable.name, version: vuln.fixAvailable.version };
-          }
-        }
-
-        // Direct deps: always allow patching — breaking updates show a warning but are still actionable
-        if (vuln.isDirect) {
-          if (!fixVersion && fixAvailable) {
-            fixVersion = 'latest';
-          }
-        }
-
-        // Transitive deps: determine fix strategy.
-        // Also covers self-advisory packages (e.g. hono) where via[] contains only advisory
-        // objects (no string parent references), so parentPackage is undefined but the vuln
-        // IS in this package itself and needs a direct override.
-        if (!vuln.isDirect && (parentPackage || !fixVersion)) {
-          if (fixByParent && !isBreakingFix) {
-            // Best path: update the parent dependency (non-breaking)
-            fixAvailable = true;
-            fixVersion = fixByParent.version;
-          } else {
-            // Fallback: apply a package manager override for this package directly.
-            // Extract fix version from advisory range in via objects (works for both
-            // "via parent" cases and self-advisory packages like hono).
-            let overrideVersion: string | undefined;
-            const viaAdvisories = vuln.via?.filter(v => typeof v === 'object' && v.range) as
-              Array<{ range: string }> | undefined;
-
-            if (viaAdvisories?.length) {
-              const fixVersions: string[] = [];
-              for (const adv of viaAdvisories) {
-                const upperBounds = adv.range.match(/<(\d+\.\d+\.\d+)/g);
-                if (upperBounds) {
-                  for (const bound of upperBounds) {
-                    fixVersions.push(bound.slice(1));
-                  }
-                }
-              }
-
-              if (fixVersions.length > 0 && currentVersion) {
-                const currentMajor = parseInt(currentVersion.split('.')[0], 10);
-                const sameMajorFix = fixVersions.find(v => parseInt(v.split('.')[0], 10) === currentMajor);
-                overrideVersion = sameMajorFix || fixVersions[fixVersions.length - 1];
-              } else if (fixVersions.length > 0) {
-                overrideVersion = fixVersions[fixVersions.length - 1];
-              }
-            }
-
-            fixAvailable = true;
-            fixVersion = overrideVersion || 'resolve-latest';
-            fixViaOverride = true;
-
-            // If the parent update exists but is breaking, keep the reference for display
-            if (fixByParent && isBreakingFix) {
-              // fixByParent preserved so UI can show the alternative
-            } else {
-              fixByParent = undefined;
-            }
-          }
-        }
-
-        // Self-advisory: not a direct dep, advisory is on the package itself (no string
-        // parents in via[]), but fixVersion was resolved directly from the advisory range.
-        // Must go through the override mechanism — it can't be updated as a direct dep.
-        if (!vuln.isDirect && !parentPackage && !viaChain?.length && fixVersion && !fixViaOverride) {
-          fixViaOverride = true;
-        }
-
-        result.push({
-          name,
-          severity: vuln.severity as VulnSeverity,
-          title,
-          path: name,
-          fixAvailable,
-          fixVersion,
-          currentVersion,
-          isDirect: vuln.isDirect ?? true,
-          via: viaChain?.length > 0 ? viaChain : undefined,
-          parentPackage,
-          parentAtLatest: isBreakingFix,
-          fixViaOverride: fixViaOverride || undefined,
-          fixByParent,
-          isBreakingFix: isBreakingFix || undefined,
-          advisoryId,
-          url,
-        });
-      }
-    }
-
-    // Drop entries where the fix version is older than the currently installed version.
-    // This happens when npm audit references an advisory whose patched_versions only
-    // covers an older major (e.g. next <9.3.3 advisory while installed is 16.2.4).
-    // The package is already beyond the vulnerable range — no action needed.
-    //
-    // Exception: fixViaOverride entries must NOT be filtered by the top-level installed
-    // version. The vulnerable copy is nested (e.g. next/node_modules/postcss @8.4.31)
-    // while the top-level version may already be patched. npm audit is the authoritative
-    // source — if it still reports the vuln, the override hasn't been applied yet.
-    return result.filter(vuln => {
-      if (!vuln.fixVersion || !vuln.currentVersion) return true;
-      if (vuln.fixVersion === 'latest' || vuln.fixVersion === 'resolve-latest') return true;
-      if (vuln.fixViaOverride) return true;
-      return !semverGte(vuln.currentVersion, vuln.fixVersion);
-    });
+    const { vulnerabilities } = await runPnpmAudit(project.path, pm);
+    return vulnerabilities;
   } catch (error) {
     console.error(`Failed to scan vulnerabilities for ${project.id}:`, error);
     return [];
