@@ -57,6 +57,7 @@ export function PackageHealthSection({ projectId, projectName, initialOutdatedCo
   const [auditSummary, setAuditSummary] = useState<{ vulnCount: number; criticalCount: number; remainingAdvisories: string[] } | null>(null);
   const hasAutoChecked = useRef(false);
   const [grypeConfirmedPkgs, setGrypeConfirmedPkgs] = useState<Set<string>>(new Set());
+  const [remediationByPkg, setRemediationByPkg] = useState<Record<string, { command?: string; validated?: string; parentUpgrade?: string }>>({});
 
   const fetchHealth = async () => {
     setLoading(true);
@@ -178,6 +179,17 @@ export function PackageHealthSection({ projectId, projectName, initialOutdatedCo
             pkgs.add(f.package);
           }
         }
+        const rem: Record<string, { command?: string; validated?: string; parentUpgrade?: string }> = {};
+        for (const fnd of (proj.findings ?? []) as Array<{type?:string;package?:string;remediation?:{runnableFixCommand?:string;validatedFixVersion?:string;parentUpgrade?:string}}>) {
+          if (fnd.type === 'vulnerability' && fnd.package && fnd.remediation) {
+            rem[fnd.package] = {
+              command: fnd.remediation.runnableFixCommand,
+              validated: fnd.remediation.validatedFixVersion,
+              parentUpgrade: fnd.remediation.parentUpgrade,
+            };
+          }
+        }
+        setRemediationByPkg(rem);
         setGrypeConfirmedPkgs(pkgs);
       })
       .catch(() => { /* security cache optional */ });
@@ -298,6 +310,11 @@ export function PackageHealthSection({ projectId, projectName, initialOutdatedCo
                       <span className="ml-1 px-1 py-0.5 text-[9px] rounded border border-green-700 text-green-300 bg-green-900/20" title="Independently confirmed by Grype">
                         grype ✓
                       </span>
+                    )}
+                    {remediationByPkg[vuln.name]?.command && (
+                      <code className="ml-2 text-[10px] text-green-300 bg-green-900/15 border border-green-800 rounded px-1.5 py-0.5" title={remediationByPkg[vuln.name]?.parentUpgrade ? `Parent upgrade: ${remediationByPkg[vuln.name]?.parentUpgrade}` : `cve-lite validated fix → ${remediationByPkg[vuln.name]?.validated ?? ''}`}>
+                        {remediationByPkg[vuln.name]?.command}
+                      </code>
                     )}
                     {dep?.specifier && (
                       <span className="font-mono text-zinc-600 text-xs">{dep.specifier}</span>
