@@ -17,6 +17,15 @@ export const SEVERITY_RANK: Record<Severity, number> = {
   critical: 4,
 };
 
+export interface Remediation {
+  source: string;                 // e.g. 'cve-lite'
+  validatedFixVersion?: string;   // verified-non-vulnerable target
+  runnableFixCommand?: string;    // e.g. "npm install axios@0.31.1"
+  recommendedAction?: string;     // human-readable sentence
+  parentUpgrade?: string;         // display summary for transitive parent-upgrade path
+  relationship?: 'direct' | 'transitive';
+}
+
 export interface Finding {
   type: FindingType;
   dedupKey: string;
@@ -33,6 +42,8 @@ export interface Finding {
   rawBySource: Record<string, unknown>;
   fixedIn?: string;
   references: string[];
+  remediation?: Remediation;      // populated only by cve-lite
+  reachable?: boolean | null;     // from --usage; null = not analyzed / unknown
 }
 
 export type SourceStatus = 'ok' | 'failed' | 'unavailable' | 'timeout';
