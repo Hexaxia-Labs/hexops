@@ -129,3 +129,45 @@ describe('mergeFindings', () => {
     expect(merged).toHaveLength(2);
   });
 });
+
+describe('mergeFindings — remediation + reachable (cve-lite)', () => {
+  it('preserves remediation from the cve-lite side of a merge', () => {
+    const grype = f({ advisoryIds: ['GHSA-x'], package: 'axios', severity: 'high', sources: ['grype'], fixedIn: '0.21.2' });
+    const cve = f({
+      advisoryIds: ['GHSA-x'], package: 'axios', severity: 'high', sources: ['cve-lite'], fixedIn: '0.31.1',
+      remediation: { source: 'cve-lite', validatedFixVersion: '0.31.1', runnableFixCommand: 'npm install axios@0.31.1', relationship: 'direct' },
+    });
+    const [m] = mergeFindings(new Map([['grype', [grype]], ['cve-lite', [cve]]]));
+    expect(m.sources.sort()).toEqual(['cve-lite', 'grype']);
+    expect(m.remediation?.runnableFixCommand).toBe('npm install axios@0.31.1');
+  });
+
+  it('prefers the validated fix version for fixedIn regardless of merge order', () => {
+    const grype = f({ advisoryIds: ['GHSA-y'], severity: 'high', sources: ['grype'], fixedIn: '0.21.2' });
+    const cve = f({
+      advisoryIds: ['GHSA-y'], severity: 'high', sources: ['cve-lite'], fixedIn: '0.31.1',
+      remediation: { source: 'cve-lite', validatedFixVersion: '0.31.1' },
+    });
+    const [a] = mergeFindings(new Map([['grype', [grype]], ['cve-lite', [cve]]]));
+    expect(a.fixedIn).toBe('0.31.1');
+    const [b] = mergeFindings(new Map([['cve-lite', [cve]], ['grype', [grype]]]));
+    expect(b.fixedIn).toBe('0.31.1');
+  });
+
+  it('prefers a non-null reachable across the merge', () => {
+    const grype = f({ advisoryIds: ['GHSA-z'], severity: 'high', sources: ['grype'] });
+    const cve = f({ advisoryIds: ['GHSA-z'], severity: 'high', sources: ['cve-lite'], reachable: true });
+    const [m] = mergeFindings(new Map([['grype', [grype]], ['cve-lite', [cve]]]));
+    expect(m.reachable).toBe(true);
+  });
+
+  it('3-way merge tags all three sources on a shared advisory', () => {
+    const pnpm = f({ advisoryIds: ['GHSA-3'], package: 'p', severity: 'high', sources: ['pnpm-audit'] });
+    const grype = f({ advisoryIds: ['GHSA-3'], package: 'p', severity: 'high', sources: ['grype'] });
+    const cve = f({ advisoryIds: ['GHSA-3'], package: 'p', severity: 'high', sources: ['cve-lite'], remediation: { source: 'cve-lite', runnableFixCommand: 'npm install p@2' } });
+    const merged = mergeFindings(new Map([['pnpm-audit', [pnpm]], ['grype', [grype]], ['cve-lite', [cve]]]));
+    expect(merged).toHaveLength(1);
+    expect(merged[0].sources.sort()).toEqual(['cve-lite', 'grype', 'pnpm-audit']);
+    expect(merged[0].remediation?.runnableFixCommand).toBe('npm install p@2');
+  });
+});

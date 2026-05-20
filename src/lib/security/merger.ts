@@ -34,6 +34,8 @@ function uniq<T>(xs: T[]): T[] {
 function mergeTwo(existing: Finding, incoming: Finding): Finding {
   const minRank = Math.min(SEVERITY_RANK[existing.severity], SEVERITY_RANK[incoming.severity]);
   const maxRank = Math.max(SEVERITY_RANK[existing.severity], SEVERITY_RANK[incoming.severity]);
+  // Prefer a cve-lite-validated fix version over a raw advisory fixedIn.
+  const validated = existing.remediation?.validatedFixVersion ?? incoming.remediation?.validatedFixVersion;
   return {
     ...existing,
     sources: uniq([...existing.sources, ...incoming.sources]),
@@ -42,8 +44,10 @@ function mergeTwo(existing: Finding, incoming: Finding): Finding {
     cvss: Math.max(existing.cvss ?? 0, incoming.cvss ?? 0) || undefined,
     advisoryIds: uniq([...existing.advisoryIds, ...incoming.advisoryIds]),
     references: uniq([...existing.references, ...incoming.references]),
-    fixedIn: existing.fixedIn ?? incoming.fixedIn,
+    fixedIn: validated ?? existing.fixedIn ?? incoming.fixedIn,
     divergent: (maxRank - minRank) > 1 ? true : existing.divergent,
+    remediation: existing.remediation ?? incoming.remediation,
+    reachable: existing.reachable ?? incoming.reachable,
   };
 }
 
