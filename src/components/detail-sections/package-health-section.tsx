@@ -56,6 +56,7 @@ export function PackageHealthSection({ projectId, projectName, initialOutdatedCo
   const [updateOutput, setUpdateOutput] = useState<string | null>(null);
   const [auditSummary, setAuditSummary] = useState<{ vulnCount: number; criticalCount: number; remainingAdvisories: string[] } | null>(null);
   const hasAutoChecked = useRef(false);
+  const [grypeConfirmedPkgs, setGrypeConfirmedPkgs] = useState<Set<string>>(new Set());
 
   const fetchHealth = async () => {
     setLoading(true);
@@ -163,6 +164,23 @@ export function PackageHealthSection({ projectId, projectName, initialOutdatedCo
 
   useEffect(() => {
     fetchHealth();
+  }, [projectId]);
+
+  useEffect(() => {
+    fetch('/api/security/findings')
+      .then(r => r.json())
+      .then((data) => {
+        const proj = data.projects?.find((p: { projectId: string }) => p.projectId === projectId);
+        if (!proj) return;
+        const pkgs = new Set<string>();
+        for (const f of (proj.findings ?? [])) {
+          if (f.type === 'vulnerability' && f.package && f.sources?.includes('grype') && f.sources?.includes('pnpm-audit')) {
+            pkgs.add(f.package);
+          }
+        }
+        setGrypeConfirmedPkgs(pkgs);
+      })
+      .catch(() => { /* security cache optional */ });
   }, [projectId]);
 
   // Auto-check for outdated packages if dashboard shows outdated but we don't have the data
@@ -276,6 +294,11 @@ export function PackageHealthSection({ projectId, projectName, initialOutdatedCo
                   <div className="flex items-center gap-2">
                     <SeverityBadge severity={vuln.severity} />
                     <span className="font-mono text-zinc-300">{vuln.name}</span>
+                    {grypeConfirmedPkgs.has(vuln.name) && (
+                      <span className="ml-1 px-1 py-0.5 text-[9px] rounded border border-green-700 text-green-300 bg-green-900/20" title="Independently confirmed by Grype">
+                        grype ✓
+                      </span>
+                    )}
                     {dep?.specifier && (
                       <span className="font-mono text-zinc-600 text-xs">{dep.specifier}</span>
                     )}
