@@ -25,6 +25,7 @@ import { scanSpecVulnerabilities } from './spec-scanner';
 import { checkLockFileFreshness } from './lockfile-checker';
 import { hasDependabotConfig } from './dependabot-detector';
 import { getAllEscalations, resolveEscalation } from './escalation-store';
+import { readSecurityCache } from './security/persistence';
 
 const execAsync = promisify(exec);
 
@@ -640,6 +641,17 @@ export async function scanProject(
   }
   for (const pkg of outdated) {
     if (pkg.current) installedVersions[pkg.name] = pkg.current;
+  }
+  // Union in Grype-confirmed vulnerable packages so nested-copy overrides
+  // (missed by pnpm audit) are also caught by reconcilePatchHistory (#80).
+  const securityCache = readSecurityCache(project.id);
+  if (securityCache) {
+    for (const f of securityCache.findings) {
+      if (f.type !== 'vulnerability' || !f.package) continue;
+      if (f.sources.includes('grype')) {
+        stillVulnerablePackages.add(f.package);
+      }
+    }
   }
   if (Object.keys(installedVersions).length > 0 || stillVulnerablePackages.size > 0) {
     const corrected = reconcilePatchHistory(project.id, installedVersions, stillVulnerablePackages);
