@@ -5,6 +5,20 @@ All notable changes to HexOps are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.1] - 2026-05-21
+
+### Performance
+- **Batch patching** — all packages for a project are now sent in a single `/update` call instead of one call per package. Eliminates N-1 redundant lockfile reconciliation installs, post-patch audits, and project rescans. A 10-package batch that previously triggered 10 sequential npm installs now triggers one (#98).
+
+### Fixed
+- Push button in Patches shows accurate ahead count — git route now runs `git fetch origin` before `rev-list` so `@{u}` resolves against the real remote state instead of a stale local tracking ref (#100).
+
+### Changed
+- Patches update status: single-project batches show an indeterminate pulsing bar + package count; multi-project batches show a per-project step counter ("project 1 of 3").
+- Push button no longer shows a `↑` arrow suffix that rendered ambiguously alongside the count.
+
+---
+
 ## [0.20.0] - 2026-05-21
 
 ### Added
