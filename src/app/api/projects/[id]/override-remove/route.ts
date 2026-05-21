@@ -6,6 +6,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { detectPackageManager } from '@/lib/patch-scanner';
 import { invalidateProjectCache } from '@/lib/patch-storage';
+import { AUTO_APPLY_ENABLED } from '@/lib/auto-apply-flag';
 
 const execAsync = promisify(exec);
 
@@ -14,6 +15,13 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    if (!AUTO_APPLY_ENABLED) {
+      return NextResponse.json(
+        { success: false, error: 'Auto-apply is disabled in HexOps. Re-enable AUTO_APPLY_ENABLED to apply updates.' },
+        { status: 409 },
+      );
+    }
+
     const { id } = await params;
     const { package: pkgName } = await request.json();
 

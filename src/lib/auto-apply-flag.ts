@@ -13,4 +13,4 @@
  * remain intact. Flip this to `true` to restore the buttons once a better
  * workflow is in place.
  */
-export const AUTO_APPLY_ENABLED: boolean = false;
+export const AUTO_APPLY_ENABLED: boolean = true;
