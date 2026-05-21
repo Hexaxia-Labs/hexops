@@ -4,6 +4,44 @@ HexOps includes three complementary security layers. CVE Lite is available fleet
 
 > **Note:** Security features in HexOps are actively evolving. CVE Lite is early access — the scanning pipeline, fix workflows, and artifact formats may change between releases.
 
+## Setup
+
+### CVE Lite
+
+`cve-lite-cli` ships as a dev dependency of HexOps — no separate install needed. Running `pnpm install` at the HexOps root is all that's required. The binary is available at `node_modules/.bin/cve-lite`.
+
+To confirm it's available:
+
+```bash
+./node_modules/.bin/cve-lite --version
+```
+
+### Grype (optional)
+
+[Grype](https://github.com/anchore/grype) is an optional system binary that provides a second vulnerability source alongside `pnpm audit`. When present, HexOps automatically runs it per-project and merges findings with the other sources. When absent, it is silently skipped.
+
+**Linux / WSL:**
+
+```bash
+curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b ~/.local/bin
+```
+
+**macOS (Homebrew):**
+
+```bash
+brew install grype
+```
+
+Confirm install:
+
+```bash
+grype version
+```
+
+Grype maintains its own vulnerability database. HexOps triggers `grype db update` automatically if the database is older than 7 days.
+
+---
+
 ## CVE Lite Dashboard
 
 OSV-backed dependency remediation — available at `/security/cve-lite` in the sidebar.
