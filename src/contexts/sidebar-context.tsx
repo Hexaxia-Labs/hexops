@@ -29,7 +29,10 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
 
   const loadData = useCallback(() => {
     fetch('/api/sidebar')
-      .then(r => r.json())
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then((data) => {
         const projects: ProjectStatus[] = data.projects || [];
         const cats = [...new Set(projects.map(p => p.category))].filter(Boolean).sort();
@@ -42,7 +45,7 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
         setRunningCount(projects.filter(p => p.status === 'running').length);
         setTotalCount(projects.length);
       })
-      .catch(() => {})
+      .catch((err) => console.error('[sidebar]', err))
       .finally(() => setIsLoading(false));
   }, []);
 
