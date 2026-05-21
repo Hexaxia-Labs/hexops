@@ -1,8 +1,10 @@
 # Security Scanning
 
-HexOps includes three complementary security layers. CVE Lite is available fleet-wide from the sidebar; the Code Security and Supply Chain scanners are available per-project from the project detail view.
+HexOps includes three complementary security layers. CVE Lite and the fleet-wide Security dashboard are available from the sidebar; the Code Security and Supply Chain scanners are available per-project from the project detail view.
 
 > **Note:** Security features in HexOps are actively evolving. CVE Lite is early access — the scanning pipeline, fix workflows, and artifact formats may change between releases.
+
+---
 
 ## Setup
 
@@ -18,7 +20,7 @@ To confirm it's available:
 
 ### Grype (optional)
 
-[Grype](https://github.com/anchore/grype) is an optional system binary that provides a second vulnerability source alongside `pnpm audit`. When present, HexOps automatically runs it per-project and merges findings with the other sources. When absent, it is silently skipped.
+[Grype](https://github.com/anchore/grype) is an optional system binary that provides a second vulnerability source alongside `pnpm audit`. When present, HexOps automatically runs it per-project and merges findings with the other sources. When absent, the source status shows `unavailable` and it is silently skipped — no errors, no empty panels.
 
 **Linux / WSL:**
 
@@ -42,58 +44,153 @@ Grype maintains its own vulnerability database. HexOps triggers `grype db update
 
 ---
 
-## CVE Lite Dashboard
+## Fleet Security Dashboard
 
-OSV-backed dependency remediation — available at `/security/cve-lite` in the sidebar.
+Available at `/security` in the sidebar. Shows merged findings from all active sources for any project in the fleet.
 
-CVE Lite scans a project's dependencies against the [OSV database](https://osv.dev) (an OWASP project), providing structured vulnerability triage and fix guidance beyond what `npm audit` alone covers.
+### Selecting a Project
 
-### Running a Scan
+Use the **project** dropdown at the top to switch between projects. Findings load from the most recent cached scan; the source strip shows when each source last ran.
 
-Select a project from the dropdown → scan runs automatically (cached 1 hour). Click **Rescan** to force a fresh scan.
+### Filters
 
-### Scan Options
+Two filters narrow the findings table without triggering a new scan:
 
-| Option | What It Does |
-|--------|-------------|
-| **Min Severity** | Filter findings below a threshold (low / medium / high / critical) |
-| **Prod Only** | Exclude devDependencies from results |
-| **Imported Only** | Show only packages with detected import usage in source code |
-| **All** | Include all findings regardless of reachability |
+| Filter | Values |
+|--------|--------|
+| **Type** | All types / vulnerability / integrity / secret / license / config |
+| **Severity** | All severities / critical / high / medium / low / info |
 
-Non-default options bypass the 1-hour cache and always trigger a fresh scan.
+### Source Strip
 
-### Fix Plan
+A compact status bar above the findings table shows each scanner's last result:
 
-Groups actionable fixes by severity. Each group shows the runnable install command. The **Fix all direct** button runs `cve-lite --fix` to apply all direct-dependency fixes at once.
+```
+pnpm-audit ✓  3m ago    grype ✓  3m ago    cve-lite ✗  · error          [Rescan]
+```
+
+| Indicator | Meaning |
+|-----------|---------|
+| `✓` green | Source ran and returned findings (or a clean result) |
+| `✗` red | Source ran but encountered an error |
+| `timeout` yellow | Source exceeded its time budget |
+| `unavailable` grey | Source is not installed (Grype only) |
+
+Click **Rescan** to force a fresh scan across all sources for the selected project.
 
 ### Findings Table
 
 | Column | Description |
 |--------|-------------|
-| Package | Dependency name |
-| Version | Currently installed version |
-| Severity | critical / high / medium / low |
-| CVE IDs | Advisory identifiers (OSV, CVE, GHSA) |
-| Fix Version | Validated safe version |
-| Relationship | direct / transitive |
-| Apply | Apply fix through the patch pipeline (transitive deps use `pm override`) |
+| **Type** | vulnerability / integrity / secret / license / config |
+| **Package** | `name@version` for dependency findings; `—` for file-based findings |
+| **Title** | Advisory title or rule description |
+| **Severity** | critical / high / medium / low / info |
+| **Sources** | Badge for each source that reported this finding (e.g. `pnpm-audit` `grype`) |
+| **Fix** | Runnable install command if known, or a link to the Patches page |
 
-### Artifacts
+#### Multi-source badges
 
-| Button | Output |
-|--------|--------|
-| **CycloneDX SBOM** | Software Bill of Materials in CycloneDX JSON format |
-| **SARIF** | Static Analysis Results Interchange Format — import into GitHub Security tab |
-| **Full Report** | Raw CVE Lite JSON output |
+When more than one source reports the same vulnerability, all source names appear as badges in the **Sources** column. A finding confirmed by both `pnpm-audit` and `grype` is more reliable than one from a single source.
 
-### OSV Database Management
+#### Reachability indicators
 
-The **Manage** panel shows your local OSV DB status (version, last sync). Use **Sync DB** to pull the latest advisories. The DB is shared across all project scans.
+CVE Lite's `--usage` analysis annotates findings with:
+
+- **`reachable`** (amber) — the package is detected as imported in your source code
+- **`not imported`** (grey) — not detected as imported (best-effort; not used to hide findings)
+
+#### Divergence warning
+
+When two sources report the same advisory at severity levels that differ by more than one step (e.g. one says `high`, another says `low`), the finding is tagged **⚠ divergent**. This is informational — review both source reports if prioritizing remediation order matters.
+
+---
+
+## CVE Lite Dashboard
+
+Available at `/security/cve-lite` in the sidebar. Per-project CVE triage powered by `cve-lite-cli`, backed by the [OSV database](https://osv.dev).
+
+### Typical Triage Session
+
+1. Select a project from the toolbar dropdown
+2. Review the **Fix plan** — grouped by severity, each group shows the runnable install command
+3. Check the **Findings** table for context on individual advisories
+4. Apply fixes (see below), then click **Re-scan** to verify
+
+### Toolbar
+
+| Control | Description |
+|---------|-------------|
+| **Project dropdown** | Switch between managed projects |
+| **scanned X ago** | Time since the most recent scan result was cached |
+| **Re-scan** | Force a fresh scan (bypasses the 1-hour cache) |
+| **imported only** | Client-side toggle — hides findings where the package was not detected as imported |
+| **SBOM** | Downloads a CycloneDX JSON software bill of materials |
+| **SARIF** | Downloads a SARIF file — import into the GitHub Security tab |
+| **HTML report** | Opens the full `cve-lite` HTML report in a new browser tab |
+
+### Scan Options
+
+Options below the toolbar change what `cve-lite-cli` scans for. Any non-default selection shows a **live scan** amber indicator and bypasses the 1-hour cache.
+
+| Option | What It Does |
+|--------|-------------|
+| **min severity** | Only report findings at or above this threshold (default: all) |
+| **prod-only** | Exclude `devDependencies` from results |
+| **only-used (scan)** | Pass `--only-used` to the CLI — restrict the scan itself to imported packages |
+| **show all** | Pass `--all` — include all findings regardless of reachability |
+
+`imported only` in the toolbar is a client-side filter applied after the scan; `only-used (scan)` in the options passes the flag to the CLI and changes what gets scanned.
+
+### OSV Database Panel
+
+Shows the age of the local OSV advisory database. Stale data produces inaccurate results.
+
+| Control | Description |
+|---------|-------------|
+| **OSV DB: X ago** | When the database was last synced |
+| **Sync DB** | Pull the latest advisories from OSV |
+| **CI fails on: critical** | Informational — shows the `--fail-on` threshold used by `cve-lite-cli`; not enforced by HexOps |
+| **install-skill** | Write Claude Code AI skill files into the selected project |
+
+### Fix Plan
+
+Groups all actionable fixes by severity (critical → low). Each group shows:
+- The packages affected
+- A runnable `npm install` / `pnpm add` command you can copy and run directly
+
+**Fix all direct** — runs `cve-lite --fix` in the project directory, rewriting `package.json` and the lockfile in one step. A confirmation dialog appears before execution; a rescan runs automatically after. Restart the project's dev server if the fix changes runtime dependencies.
+
+> Fix all direct only applies to direct dependencies. Transitive dependencies require the per-row Apply action.
+
+### Findings Table
+
+| Column | Description |
+|--------|-------------|
+| **Package** | Dependency name |
+| **Version** | Currently installed version |
+| **Severity** | critical / high / medium / low |
+| **CVE IDs** | Advisory identifiers (OSV, CVE, GHSA) |
+| **Fix Version** | Validated safe version from OSV |
+| **Relationship** | direct / transitive |
+| **Apply** | Route fix through the patch pipeline |
+
+The **imported only** toolbar toggle filters this table client-side — it does not re-run the scan.
+
+### Applying Individual Fixes
+
+Click **Apply** on any row to route the fix through the same patch pipeline used by the Patches dashboard:
+
+- **Direct dependencies** — runs `pnpm add pkg@<fix-version>` via the update route
+- **Transitive dependencies** — injects a flat `pnpm.overrides` / npm `overrides` entry to pin the package without promoting it to a direct dependency
+
+A confirmation dialog shows the exact version change before executing. A rescan runs automatically after each apply. You may need to restart the project's dev server if a runtime dependency changes.
+
+> The **Apply** button and **Fix all direct** button are only shown when `AUTO_APPLY_ENABLED=true` in the HexOps environment. When the flag is off, use the install commands from the Fix plan or apply via the Patches page manually.
 
 ### AI Skill Files
 
-**Install Skill** writes Claude Code and AI assistant integration files into the project directory, enabling `/cve-lite` slash command support in that project's AI workflow.
+**install-skill** runs `cve-lite install-skill` in the selected project directory, writing Claude Code and AI assistant integration files. This enables `/cve-lite` slash command support in that project's AI workflow.
 
 ---
 
