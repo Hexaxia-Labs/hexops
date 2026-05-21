@@ -5,7 +5,7 @@
 Manage 5, 15, or 50+ local dev projects from a single web interface. Start/stop servers, batch-patch vulnerabilities, monitor system health, and deploy to Vercel without touching a terminal.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-0.14.0-green.svg)
+![Version](https://img.shields.io/badge/version-0.20.0-green.svg)
 ![Node](https://img.shields.io/badge/node-20%2B-brightgreen.svg)
 ![Next.js](https://img.shields.io/badge/Next.js-16-black.svg)
 
@@ -202,7 +202,7 @@ HexOps provides full shell access and process control. These are powerful featur
 
 ## Roadmap
 
-### Completed (v0.14.0)
+### Completed (v0.20.0)
 - [x] CVE Lite dashboard — OSV-backed per-project CVE triage, fix plan, SBOM/SARIF export
 - [x] Concurrent patch scanning — 5 projects in parallel, 10s registry timeout (was serial 30s)
 - [x] Server-side auto-apply gate — all mutation endpoints return 409 when disabled
