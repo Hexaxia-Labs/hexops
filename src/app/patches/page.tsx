@@ -856,7 +856,7 @@ export default function PatchesPage() {
       });
     }
 
-    const totalUpdates = selectedItems.length;
+    const totalUpdates = updatesByProject.size;
     let completedUpdates = 0;
 
     setUpdateStatus({
@@ -925,7 +925,7 @@ export default function PatchesPage() {
         }
       }
 
-      completedUpdates += packages.length;
+      completedUpdates += 1;
     }
 
     setUpdateStatus(null);
