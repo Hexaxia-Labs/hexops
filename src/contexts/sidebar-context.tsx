@@ -54,7 +54,7 @@ export function SidebarProvider({ children, initialProjects = [] }: { children: 
         setRunningCount(projects.filter(p => p.status === 'running').length);
         setTotalCount(projects.length);
       })
-      .catch((err) => console.error('[sidebar]', err))
+      .catch(() => { /* fetch unavailable in this env — initial data from SSR is used */ })
       .finally(() => setIsLoading(false));
   }, []);
 
