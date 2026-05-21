@@ -36,6 +36,15 @@ function SecurityHubInner() {
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const refreshRail = useCallback(() => {
+    fetch('/api/security/cve-lite/summary')
+      .then(r => r.json())
+      .then(d => setRailProjects(
+        (d.projects ?? []).sort((a: FleetProject, b: FleetProject) => a.name.localeCompare(b.name))
+      ))
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     fetch('/api/security/cve-lite/summary')
       .then(r => r.json())
@@ -80,13 +89,14 @@ function SecurityHubInner() {
       }
       setReport(await res.json());
       setScannedAt(new Date().toISOString());
+      refreshRail();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'scan failed');
       setReport(null);
     } finally {
       setLoading(false);
     }
-  }, [selected, options]);
+  }, [selected, options, refreshRail]);
 
   useEffect(() => { load(false); }, [load]);
 
