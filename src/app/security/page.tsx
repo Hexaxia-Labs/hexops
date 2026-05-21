@@ -23,8 +23,11 @@ export default function SecurityPage() {
 
   const load = useCallback(async () => {
     const r = await fetch('/api/security/findings').then(x => x.json());
-    setData(r.projects);
-    if (!selected && r.projects.length > 0) setSelected(r.projects[0].projectId);
+    const projects: ProjectFindings[] = [...(r.projects ?? [])].sort((a, b) =>
+      a.projectName.localeCompare(b.projectName),
+    );
+    setData(projects);
+    if (!selected && projects.length > 0) setSelected(projects[0].projectId);
   }, [selected]);
 
   useEffect(() => { load(); }, [load]);
