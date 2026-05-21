@@ -28,6 +28,7 @@ import { getAllEscalations, resolveEscalation } from './escalation-store';
 import { readSecurityCache } from './security/persistence';
 
 const execAsync = promisify(exec);
+const OUTDATED_TIMEOUT_MS = 10_000;
 
 /**
  * Resolve the installed version of a package by checking the paths npm audit
@@ -255,7 +256,7 @@ export async function scanOutdated(
       : 'yarn outdated --json';
 
     try {
-      const { stdout } = await execAsync(cmd, { cwd: project.path, timeout: 30000 });
+      const { stdout } = await execAsync(cmd, { cwd: project.path, timeout: OUTDATED_TIMEOUT_MS });
       output = stdout;
     } catch (err: unknown) {
       // These commands exit non-zero when outdated packages exist, or may timeout
