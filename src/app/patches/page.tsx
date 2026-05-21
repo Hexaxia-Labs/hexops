@@ -15,6 +15,7 @@ import { EscalateModal } from '@/components/escalate-modal';
 import { AcceptedRiskPanel } from '@/components/accepted-risk-panel';
 import { ActiveOverridesPanel, type ProjectOverride } from '@/components/active-overrides-panel';
 import { generatePatchCommitMessage, type UpdatedPackage } from '@/lib/patch-commit-message';
+import { AUTO_APPLY_ENABLED } from '@/lib/auto-apply-flag';
 import { GitCommit, Upload, Pencil, X, Download } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 
@@ -1249,15 +1250,17 @@ export default function PatchesPage() {
                   <PauseCircle className="h-3 w-3 mr-1" />
                   Hold All
                 </Button>
-                <Button
-                  size="sm"
-                  className="h-7 text-xs bg-purple-600 hover:bg-purple-700"
-                  onClick={handleUpdateSelected}
-                  disabled={updating}
-                >
-                  <ArrowUp className={cn('h-3 w-3 mr-1', updating && 'animate-bounce')} />
-                  {updating ? 'Updating...' : 'Update Selected'}
-                </Button>
+                {AUTO_APPLY_ENABLED && (
+                  <Button
+                    size="sm"
+                    className="h-7 text-xs bg-purple-600 hover:bg-purple-700"
+                    onClick={handleUpdateSelected}
+                    disabled={updating}
+                  >
+                    <ArrowUp className={cn('h-3 w-3 mr-1', updating && 'animate-bounce')} />
+                    {updating ? 'Updating...' : 'Update Selected'}
+                  </Button>
+                )}
               </div>
             ) : filteredQueue.length > 0 ? (
               <Button
@@ -1807,20 +1810,22 @@ function PatchRow({ item, itemKey, isSelected, onToggle, onHold, showProject, on
               <span className="text-xs text-blue-400/70">
                 Fix: package manager override{item.fixByParent ? ` (updating ${item.fixByParent.name} requires breaking change)` : ''}
               </span>
-              <button
-                className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded border border-blue-500/30 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 hover:text-blue-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={isFixingOverride}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onFixOverride?.(item);
-                }}
-              >
-                {isFixingOverride ? (
-                  <><Loader2 className="h-3 w-3 animate-spin" />fixing…</>
-                ) : (
-                  <><Wrench className="h-3 w-3" />fix now</>
-                )}
-              </button>
+              {AUTO_APPLY_ENABLED && (
+                <button
+                  className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded border border-blue-500/30 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 hover:text-blue-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={isFixingOverride}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onFixOverride?.(item);
+                  }}
+                >
+                  {isFixingOverride ? (
+                    <><Loader2 className="h-3 w-3 animate-spin" />fixing…</>
+                  ) : (
+                    <><Wrench className="h-3 w-3" />fix now</>
+                  )}
+                </button>
+              )}
             </div>
           )}
           {showProject && (
