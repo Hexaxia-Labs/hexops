@@ -2,7 +2,7 @@
 
 import { ReactNode, useState, useEffect, createContext, useContext, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { SidebarProvider, useSidebar } from '@/contexts/sidebar-context';
+import { SidebarProvider, useSidebar, type InitialSidebarProject } from '@/contexts/sidebar-context';
 import { CategoryProvider } from '@/contexts/category-context';
 import { Sidebar } from '@/components/sidebar';
 import { AddProjectDialog } from '@/components/add-project-dialog';
@@ -17,6 +17,7 @@ export function useShell() { return useContext(ShellContext); }
 
 interface ProvidersProps {
   children: ReactNode;
+  initialSidebarProjects?: InitialSidebarProject[];
 }
 
 function AppShell({ children }: { children: ReactNode }) {
@@ -109,9 +110,9 @@ function AppShell({ children }: { children: ReactNode }) {
   );
 }
 
-export function Providers({ children }: ProvidersProps) {
+export function Providers({ children, initialSidebarProjects = [] }: ProvidersProps) {
   return (
-    <SidebarProvider>
+    <SidebarProvider initialProjects={initialSidebarProjects}>
       <CategoryProvider>
         <AppShell>
           {children}

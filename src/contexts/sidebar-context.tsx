@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 
-interface ProjectStatus {
+export interface InitialSidebarProject {
   id: string;
   name: string;
   category: string;
@@ -20,12 +20,25 @@ interface SidebarData {
 
 const SidebarContext = createContext<SidebarData | null>(null);
 
-export function SidebarProvider({ children }: { children: ReactNode }) {
-  const [categories, setCategories] = useState<string[]>([]);
-  const [projectCounts, setProjectCounts] = useState<Record<string, number>>({});
-  const [runningCount, setRunningCount] = useState(0);
-  const [totalCount, setTotalCount] = useState(0);
-  const [isLoading, setIsLoading] = useState(true);
+function deriveCategories(projects: InitialSidebarProject[]): string[] {
+  return [...new Set(projects.map(p => p.category))].filter(Boolean).sort();
+}
+
+function deriveCounts(projects: InitialSidebarProject[], cats: string[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const cat of cats) {
+    counts[cat] = projects.filter(p => p.category === cat).length;
+  }
+  return counts;
+}
+
+export function SidebarProvider({ children, initialProjects = [] }: { children: ReactNode; initialProjects?: InitialSidebarProject[] }) {
+  const initCats = deriveCategories(initialProjects);
+  const [categories, setCategories] = useState<string[]>(initCats);
+  const [projectCounts, setProjectCounts] = useState<Record<string, number>>(deriveCounts(initialProjects, initCats));
+  const [runningCount, setRunningCount] = useState(() => initialProjects.filter(p => p.status === 'running').length);
+  const [totalCount, setTotalCount] = useState(() => initialProjects.length);
+  const [isLoading, setIsLoading] = useState(initialProjects.length === 0);
 
   const loadData = useCallback(() => {
     fetch('/api/sidebar')
@@ -34,14 +47,10 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
         return r.json();
       })
       .then((data) => {
-        const projects: ProjectStatus[] = data.projects || [];
-        const cats = [...new Set(projects.map(p => p.category))].filter(Boolean).sort();
-        const counts: Record<string, number> = {};
-        for (const cat of cats) {
-          counts[cat] = projects.filter(p => p.category === cat).length;
-        }
+        const projects: InitialSidebarProject[] = data.projects || [];
+        const cats = deriveCategories(projects);
         setCategories(cats);
-        setProjectCounts(counts);
+        setProjectCounts(deriveCounts(projects, cats));
         setRunningCount(projects.filter(p => p.status === 'running').length);
         setTotalCount(projects.length);
       })
