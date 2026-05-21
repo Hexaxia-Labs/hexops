@@ -1463,7 +1463,7 @@ export default function PatchesPage() {
                               disabled={ahead === 0 || gitState?.isPushing}
                             >
                               <Upload className={cn('h-3.5 w-3.5 mr-1', gitState?.isPushing && 'animate-pulse')} />
-                              {gitState?.isPushing ? 'Pushing...' : ahead > 0 ? `Push (${ahead}↑)` : 'Push'}
+                              {gitState?.isPushing ? 'Pushing...' : ahead > 0 ? `Push (${ahead})` : 'Push'}
                             </Button>
                           </>
                         );
