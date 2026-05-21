@@ -58,6 +58,12 @@ export async function GET(
     let aheadCount = 0;
     let behindCount = 0;
     try {
+      // Fetch first so @{u} resolves against the actual remote state, not a stale local tracking ref
+      await execAsync('git fetch origin --quiet', { cwd, timeout: 5000 });
+    } catch {
+      // Fetch failure is non-fatal — proceed with whatever tracking ref we have
+    }
+    try {
       const { stdout: aheadBehind } = await execAsync(
         'git rev-list --left-right --count @{u}...HEAD',
         { cwd }
