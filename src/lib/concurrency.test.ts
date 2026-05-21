@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { mapWithConcurrency } from './concurrency';
 
 describe('mapWithConcurrency', () => {
@@ -26,6 +26,7 @@ describe('mapWithConcurrency', () => {
     });
 
     expect(peakInFlight).toBeLessThanOrEqual(3);
+    expect(peakInFlight).toBeGreaterThanOrEqual(2); // actually ran concurrently
   });
 
   it('calls onSettled exactly once per item with the correct index and result', async () => {
