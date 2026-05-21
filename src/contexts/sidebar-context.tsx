@@ -15,7 +15,7 @@ interface SidebarData {
   runningCount: number;
   totalCount: number;
   isLoading: boolean;
-  refresh: () => Promise<void>;
+  refresh: () => void;
 }
 
 const SidebarContext = createContext<SidebarData | null>(null);
@@ -27,48 +27,30 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
   const [totalCount, setTotalCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
-  const fetchData = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const res = await fetch('/api/sidebar', { signal });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-
-      const projects: ProjectStatus[] = data.projects || [];
-
-      const cats = [...new Set(projects.map(p => p.category))].filter(Boolean).sort();
-      setCategories(cats);
-
-      const counts: Record<string, number> = {};
-      for (const cat of cats) {
-        counts[cat] = projects.filter(p => p.category === cat).length;
-      }
-      setProjectCounts(counts);
-
-      setRunningCount(projects.filter(p => p.status === 'running').length);
-      setTotalCount(projects.length);
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') return;
-      // Swallow network errors silently — server may still be starting up
-    } finally {
-      setIsLoading(false);
-    }
+  const loadData = useCallback(() => {
+    fetch('/api/sidebar')
+      .then(r => r.json())
+      .then((data) => {
+        const projects: ProjectStatus[] = data.projects || [];
+        const cats = [...new Set(projects.map(p => p.category))].filter(Boolean).sort();
+        const counts: Record<string, number> = {};
+        for (const cat of cats) {
+          counts[cat] = projects.filter(p => p.category === cat).length;
+        }
+        setCategories(cats);
+        setProjectCounts(counts);
+        setRunningCount(projects.filter(p => p.status === 'running').length);
+        setTotalCount(projects.length);
+      })
+      .catch(() => {})
+      .finally(() => setIsLoading(false));
   }, []);
 
-  // Initial fetch with abort on unmount
   useEffect(() => {
-    const controller = new AbortController();
-    fetchData(controller.signal);
-    return () => controller.abort();
-  }, [fetchData]);
-
-  // Poll for updates every 10 seconds with abort on unmount
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const controller = new AbortController();
-      fetchData(controller.signal);
-    }, 10000);
+    loadData();
+    const interval = setInterval(loadData, 10000);
     return () => clearInterval(interval);
-  }, [fetchData]);
+  }, [loadData]);
 
   return (
     <SidebarContext.Provider value={{
@@ -77,7 +59,7 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
       runningCount,
       totalCount,
       isLoading,
-      refresh: () => fetchData(),
+      refresh: loadData,
     }}>
       {children}
     </SidebarContext.Provider>
