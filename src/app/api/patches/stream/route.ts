@@ -87,6 +87,8 @@ export async function GET(request: NextRequest) {
   }
 
   // Streaming path: scan projects concurrently (limit 5), emit progress events
+  const CONCURRENCY = 5;
+
   const stream = new ReadableStream({
     async start(controller) {
       const total = allProjects.length;
@@ -94,7 +96,7 @@ export async function GET(request: NextRequest) {
 
       const caches = await mapWithConcurrency(
         allProjects,
-        5,
+        CONCURRENCY,
         async (project) => {
           if (request.signal.aborted) return null;
           try {
