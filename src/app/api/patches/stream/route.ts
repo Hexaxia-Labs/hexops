@@ -3,6 +3,7 @@ import { getProjects, getCategories } from '@/lib/config';
 import { readPatchState, readProjectCache } from '@/lib/patch-storage';
 import { scanProject, buildPriorityQueue } from '@/lib/patch-scanner';
 import type { ProjectPatchCache, ActiveOverride } from '@/lib/types';
+import { mapWithConcurrency } from '@/lib/concurrency';
 
 interface ProjectOverride extends ActiveOverride {
   projectId: string;
@@ -88,33 +89,36 @@ export async function GET(request: NextRequest) {
   // Streaming path: scan projects one by one, emit progress events
   const stream = new ReadableStream({
     async start(controller) {
-      const caches: (ProjectPatchCache | null)[] = [];
       const total = allProjects.length;
+      let completed = 0;
 
-      for (let i = 0; i < allProjects.length; i++) {
-        // Bail if client disconnected
-        if (request.signal.aborted) {
-          controller.close();
-          return;
-        }
+      const caches = await mapWithConcurrency(
+        allProjects,
+        5,
+        async (project) => {
+          if (request.signal.aborted) return null;
+          try {
+            return await scanProject(project, force);
+          } catch (err) {
+            console.error(`Failed to scan project ${project.id}:`, err);
+            return null;
+          }
+        },
+        (index) => {
+          completed++;
+          controller.enqueue(sseEvent({
+            type: 'progress',
+            projectId: allProjects[index].id,
+            projectName: allProjects[index].name,
+            scanned: completed,
+            total,
+          }));
+        },
+      );
 
-        const project = allProjects[i];
-
-        try {
-          const cache = await scanProject(project, force);
-          caches.push(cache);
-        } catch (err) {
-          console.error(`Failed to scan project ${project.id}:`, err);
-          caches.push(null);
-        }
-
-        controller.enqueue(sseEvent({
-          type: 'progress',
-          projectId: project.id,
-          projectName: project.name,
-          scanned: i + 1,
-          total,
-        }));
+      if (request.signal.aborted) {
+        controller.close();
+        return;
       }
 
       const validCaches = caches.filter((c): c is ProjectPatchCache => c !== null);
