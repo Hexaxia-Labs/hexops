@@ -15,7 +15,7 @@ import { EscalateModal } from '@/components/escalate-modal';
 import { AcceptedRiskPanel } from '@/components/accepted-risk-panel';
 import { ActiveOverridesPanel, type ProjectOverride } from '@/components/active-overrides-panel';
 import { generatePatchCommitMessage, type UpdatedPackage } from '@/lib/patch-commit-message';
-import { AUTO_APPLY_ENABLED } from '@/lib/auto-apply-flag';
+import { AUTO_APPLY_ENABLED, FIX_VIA_OVERRIDE_ENABLED } from '@/lib/auto-apply-flag';
 import { GitCommit, Upload, Pencil, X, Download } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 
@@ -1810,7 +1810,7 @@ function PatchRow({ item, itemKey, isSelected, onToggle, onHold, showProject, on
               <span className="text-xs text-blue-400/70">
                 Fix: package manager override{item.fixByParent ? ` (updating ${item.fixByParent.name} requires breaking change)` : ''}
               </span>
-              {AUTO_APPLY_ENABLED && (
+              {FIX_VIA_OVERRIDE_ENABLED && (
                 <button
                   className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded border border-blue-500/30 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 hover:text-blue-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   disabled={isFixingOverride}
