@@ -5,6 +5,33 @@ All notable changes to HexOps are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-05-21
+
+### Added
+- **CVE Lite dashboard** — OSV-backed per-project CVE triage powered by `cve-lite-cli`. Per-project scan with severity filters, fix plan table, and SBOM (CycloneDX) / SARIF export. Apply fixes directly or route through the patch pipeline.
+- **Grype integration** — `GrypeSource` pulls container and filesystem vulnerability data alongside `pnpm audit`. Grype-confirmed chip surfaces on vulnerability rows; confirmed packages are unioned into `stillVulnerablePackages` for post-patch verification (#80).
+- **Three-source security stack** — `PnpmAuditSource` + `GrypeSource` + `CveLiteSource` behind a unified `ScanSource` interface. Per-source timeouts, mutex-guarded atomic cache writes, severity reconciliation, and divergence flagging across sources.
+- **Security page** (`/security`) — fleet-wide findings view with project selector, severity/source filters, rescan trigger, source badges, and divergence indicators.
+- **Concurrent patch scanning** — `mapWithConcurrency` bounded worker-pool (limit 5) replaces serial scan loop. SSE progress events fire per-project as each scan completes. Projects previously blocked behind a slow registry no longer stall the queue.
+- **OSV DB sync endpoint** — `/api/security/cve-lite/sync` keeps the local OSV database current; status indicator on the CVE Lite page.
+- **Skill install endpoint** — `/api/security/cve-lite/install-skill` writes Claude Code AI skill files for CVE triage workflows.
+
+### Changed
+- `outdated` registry timeout reduced from 30s → 10s (`OUTDATED_TIMEOUT_MS`) — slow or unreachable registries no longer block the queue for 30 seconds each.
+
+### Fixed
+- Vulnerable version read from `npm audit` `nodes[]` path instead of top-level version field — was causing false-clear on nested transitive copies (#80).
+- GHSA extracted from advisory URL so npm-project findings correctly merge and deduplicate with Grype findings.
+- Findings sharing any advisory ID now merge across sources (postcss dedup fix #80).
+
+### Security
+- `/update`, `/cve-lite/fix`, and `override-remove` endpoints now return 409 when `AUTO_APPLY_ENABLED=false` — server-side kill-switch that stale UI tabs cannot bypass (#96, #97).
+- `FIX_VIA_OVERRIDE_ENABLED` flag gates the Patches "fix now" (fixViaOverride) button independently of the main apply flag — prevents the cascading install footgun while keeping all other apply actions enabled (#94).
+- Fleet-wide `postcss` pinned to 8.5.15 (GHSA-qx2v-qp2m-jg93 / CVE-2026-41305) across all managed projects. npm projects with stranded `pnpm.overrides` given correct top-level `overrides` blocks.
+- vitest bumped to 4.x; `vite` and `esbuild` pinned via overrides to clear dev-dep advisories (GHSA-67mh-4wv8-2f99, GHSA-4w7w-66w2-5vf9) (#93).
+
+---
+
 ## [0.14.0] - 2026-05-11
 
 ### Added
@@ -18,6 +45,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - next 16.2.4 → 16.2.6 (7 high CVEs: middleware bypass, DoS, SSRF, XSS)
 - fast-uri 3.1.0 → 3.1.2 (GHSA-q3j6-qgpj-74h6, GHSA-v39h-62p7-jpjc)
+
+---
+
+## [0.13.0] - 2026-04-21
+
+### Added
+- **MCP server** — 16 tools exposing HexOps APIs to Claude Code and any MCP-compatible client (`list_projects`, `start_project`, `stop_project`, `scan_patches`, `apply_patches`, `get_vulnerabilities`, `git_status`, `git_commit`, `git_push`, `get_logs`, and more). Register with `claude mcp add hexops`.
+- **Static code security scanner** — 16 grep-based PCRE rules covering hardcoded secrets, dangerous APIs, command injection, weak crypto, and misconfigurations. Supports per-project `.hexops-ignore` rule suppression.
+- **Supply chain scanner** — detects install scripts, invalid npm signatures, and typosquatted package names via Levenshtein distance.
+- **Escalate / triage mode** — when a standard patch fails, choose `force_override`, `force_major`, or `accept_risk` with optional expiry. Downgrade guard on all paths.
+- **Dependency graph** — bar chart of top 20 most-shared packages across all projects, color-coded by vulnerability status.
+- **Notifications system** — in-app bell for security events, crashes, and patch results. Optional webhook for critical alerts.
+- **Background scheduler** — configurable cron-style intervals for auto patch-scan and health-check.
+- **Patch trends dashboard** (`/patches/trends`) — 26-week rolling chart, KPI cards, per-project breakdown.
+- **Branch switcher and stash management** in the git UI.
+- **Vercel deployment history** and streaming build logs.
+- **Dependabot integration** — monitor mode for Dependabot-managed repos; branch propagation syncs `package.json` and regenerates lockfiles after merges.
+
+### Fixed
+- Post-patch audit verification now confirms advisories actually cleared, not just that the top-level version changed. Banner reports which advisories remain after update.
+- Cross-project collateral downgrade detection: after any patch, all projects sharing the same package are checked for unintended version rollbacks.
+- Override-aware patching with stale override cleanup — injects `pnpm.overrides` / npm `overrides` / yarn `resolutions` for transitive deps and removes stale entries after direct dep supersedes them.
 
 ---
 
