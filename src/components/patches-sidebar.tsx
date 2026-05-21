@@ -57,26 +57,29 @@ export function PatchesSidebar({
                 <div className="space-y-2">
                   {updateStatus.currentProject && (
                     <div className="text-xs text-zinc-400">
-                      Project: <span className="text-zinc-300">{updateStatus.currentProject}</span>
-                    </div>
-                  )}
-                  {updateStatus.currentPackage && (
-                    <div className="text-xs text-zinc-400">
-                      Package: <span className="text-zinc-300 font-mono">{updateStatus.currentPackage}</span>
+                      {updateStatus.currentProject}
+                      {updateStatus.currentPackage && (
+                        <span className="text-zinc-500"> — {updateStatus.currentPackage}</span>
+                      )}
                     </div>
                   )}
 
-                  {/* Progress bar */}
+                  {/* Multi-project: determinate bar counting projects. Single-project: indeterminate pulse. */}
                   <div className="mt-3">
-                    <div className="flex items-center justify-between text-xs text-zinc-500 mb-1">
-                      <span>Progress</span>
-                      <span>{updateStatus.progress} / {updateStatus.total}</span>
-                    </div>
-                    <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-purple-500 transition-all duration-300"
-                        style={{ width: `${(updateStatus.progress / updateStatus.total) * 100}%` }}
-                      />
+                    {updateStatus.total > 1 && (
+                      <div className="flex items-center justify-between text-xs text-zinc-500 mb-1">
+                        <span>project {updateStatus.progress + 1} of {updateStatus.total}</span>
+                      </div>
+                    )}
+                    <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">
+                      {updateStatus.total > 1 ? (
+                        <div
+                          className="h-full bg-purple-500 transition-all duration-300"
+                          style={{ width: `${(updateStatus.progress / updateStatus.total) * 100}%` }}
+                        />
+                      ) : (
+                        <div className="h-full w-full bg-purple-500 opacity-60 animate-pulse" />
+                      )}
                     </div>
                   </div>
                 </div>
