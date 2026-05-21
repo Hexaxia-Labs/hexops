@@ -871,38 +871,47 @@ export default function PatchesPage() {
     for (const [projectId, packages] of updatesByProject) {
       const projectName = packages[0]?.projectName || projectId;
 
-      for (const pkg of packages) {
-        setUpdateStatus({
-          isUpdating: true,
-          currentProject: projectName,
-          currentPackage: pkg.name,
-          progress: completedUpdates,
-          total: totalUpdates,
+      setUpdateStatus({
+        isUpdating: true,
+        currentProject: projectName,
+        currentPackage: packages.length === 1 ? packages[0].name : `${packages.length} packages`,
+        progress: completedUpdates,
+        total: totalUpdates,
+      });
+
+      try {
+        const res = await fetch(`/api/projects/${projectId}/update`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ packages }),
         });
+        const result = await res.json();
 
-        try {
-          const res = await fetch(`/api/projects/${projectId}/update`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ packages: [pkg] }),
-          });
-          const result = await res.json();
+        if (result.auditSummary) {
+          auditSummaryByProject[projectId] = result.auditSummary;
+        }
 
-          if (result.auditSummary) {
-            auditSummaryByProject[projectId] = result.auditSummary;
-          }
+        // Use per-package results from backend; fall back to top-level success if absent
+        const pkgResults: Array<{ package: string; success: boolean; error?: string }> =
+          Array.isArray(result.results) && result.results.length > 0
+            ? result.results
+            : packages.map(p => ({ package: p.name, success: result.success, error: result.error }));
 
+        for (const r of pkgResults) {
+          const pkg = packages.find(p => p.name === r.package);
           newResults.unshift({
             projectId,
             projectName,
-            packageName: pkg.name,
-            fromVersion: pkg.fromVersion,
-            toVersion: pkg.toVersion,
-            success: result.success,
-            error: result.error,
+            packageName: r.package,
+            fromVersion: pkg?.fromVersion ?? '',
+            toVersion: pkg?.toVersion ?? '',
+            success: r.success,
+            error: r.error,
             timestamp: new Date(),
           });
-        } catch (err) {
+        }
+      } catch {
+        for (const pkg of packages) {
           newResults.unshift({
             projectId,
             projectName,
@@ -914,9 +923,9 @@ export default function PatchesPage() {
             timestamp: new Date(),
           });
         }
-
-        completedUpdates++;
       }
+
+      completedUpdates += packages.length;
     }
 
     setUpdateStatus(null);
