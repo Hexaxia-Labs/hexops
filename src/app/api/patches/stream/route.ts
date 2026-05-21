@@ -86,7 +86,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // Streaming path: scan projects one by one, emit progress events
+  // Streaming path: scan projects concurrently (limit 5), emit progress events
   const stream = new ReadableStream({
     async start(controller) {
       const total = allProjects.length;
@@ -105,6 +105,7 @@ export async function GET(request: NextRequest) {
           }
         },
         (index) => {
+          if (request.signal.aborted) return;
           completed++;
           controller.enqueue(sseEvent({
             type: 'progress',
