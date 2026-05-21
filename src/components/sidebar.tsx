@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { Package, Plus, TerminalSquare, ScrollText, LayoutDashboard, Settings, Share2, ShieldCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { APP_VERSION } from '@/lib/version';
@@ -8,24 +9,23 @@ import { useSidebar } from '@/contexts/sidebar-context';
 import { NotificationBell } from '@/components/notification-bell';
 
 interface SidebarProps {
-  selectedCategory?: string | null;
-  onSelectCategory?: (category: string | null) => void;
   onAddProject?: () => void;
   onOpenShell?: () => void;
 }
 
-export function Sidebar({
-  selectedCategory = null,
-  onSelectCategory,
-  onAddProject,
-  onOpenShell,
-}: SidebarProps) {
+export function Sidebar({ onAddProject, onOpenShell }: SidebarProps) {
   const { categories, projectCounts, runningCount, totalCount } = useSidebar();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
 
-  // If no category handler provided, make buttons non-interactive (just display)
+  const selectedCategory = pathname === '/' ? (searchParams.get('category') ?? null) : null;
+
   const handleCategoryClick = (category: string | null) => {
-    if (onSelectCategory) {
-      onSelectCategory(category);
+    if (category === null) {
+      router.push('/');
+    } else {
+      router.push(`/?category=${encodeURIComponent(category)}`);
     }
   };
 

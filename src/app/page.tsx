@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { useShell } from '@/components/providers';
 import { toast } from 'sonner';
 import { ProjectList } from '@/components/project-list';
@@ -26,6 +26,7 @@ type ViewMode = 'list' | 'detail';
 
 function HomeContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const { openShell } = useShell();
   const [projects, setProjects] = useState<Project[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
@@ -39,13 +40,14 @@ function HomeContent() {
   const [detailProjectId, setDetailProjectId] = useState<string | null>(null);
   const [patchStatus, setPatchStatus] = useState<PatchStatus | null>(null);
 
-  // Handle ?project=id query param to deep link to project detail
+  // Sync ?project and ?category URL params to local state
   useEffect(() => {
     const projectId = searchParams.get('project');
     if (projectId) {
       setDetailProjectId(projectId);
       setViewMode('detail');
     }
+    setSelectedCategory(searchParams.get('category') ?? null);
   }, [searchParams]);
 
   const fetchProjects = useCallback(async () => {
@@ -358,7 +360,7 @@ function HomeContent() {
                   return (
                     <button
                       key={cat}
-                      onClick={() => setSelectedCategory(isAll ? null : cat)}
+                      onClick={() => isAll ? router.push('/') : router.push(`/?category=${encodeURIComponent(cat)}`)}
                       className={cn(
                         'shrink-0 px-3 py-2 text-xs font-medium border-b-2 transition-colors capitalize',
                         active
