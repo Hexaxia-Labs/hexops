@@ -5,7 +5,7 @@
 Manage 5, 15, or 50+ local dev projects from a single web interface. Start/stop servers, batch-patch vulnerabilities, monitor system health, and deploy to Vercel without touching a terminal.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-0.13.0-green.svg)
+![Version](https://img.shields.io/badge/version-0.14.0-green.svg)
 ![Node](https://img.shields.io/badge/node-20%2B-brightgreen.svg)
 ![Next.js](https://img.shields.io/badge/Next.js-16-black.svg)
 
@@ -28,13 +28,14 @@ Or you could open HexOps and patch all 15 in 5 minutes.
 | Feature | What You Get |
 |---------|-------------|
 | **Project Dashboard** | See all projects in one view. Start/stop dev servers. View git branch, port, uptime, memory. Autostart flagged projects on boot. |
-| **Patch Scanner** | Scan every project for vulnerabilities and outdated packages. Batch update with one click. Post-patch audit verifies advisories are actually gone. |
+| **Patch Scanner** | Scan every project for vulnerabilities and outdated packages. Concurrent scanning (5 projects at a time). Batch update with one click. Post-patch audit verifies advisories are actually gone. |
 | **Override-Aware Patching** | Automatically detects transitive deps, applies `pnpm.overrides` / `npm overrides`, cleans stale overrides after direct dep updates. |
 | **Escalate / Triage Mode** | When a patch can't land cleanly: force-override, force-major bump, or accept-risk with expiry. Downgrade guards on all paths. |
 | **Package Holds** | Skip packages that break things (per-project). ESLint major upgrade? Hold it until you're ready. |
 | **Cross-Project Integrity** | After any patch, checks all other projects for collateral downgrades of the same package. Fires a notification if found. |
 | **Dependency Graph** | Visualize shared packages across all projects. Bar chart of top 20 most-shared packages, color-coded by vulnerability status. |
 | **Code Security Scanner** | 16 grep-based PCRE rules — hardcoded secrets, dangerous APIs, command injection, weak crypto, misconfigurations. Supports `.hexops-ignore`. |
+| **CVE Lite** | OSV-backed dependency remediation (an OWASP project). Per-project scan with severity filters, fix plan, SBOM/SARIF export. Apply fixes directly or via the patch pipeline. *(Early access — security features are actively evolving.)* |
 | **Supply Chain Scanner** | Detects install scripts, invalid npm signatures, and typosquatted package names via Levenshtein distance. |
 | **Notifications** | In-app notification bell for security events, crashes, and patch results. Optional webhook for critical alerts. |
 | **Scheduler** | Configurable background tasks: auto patch-scan and health-check on cron-style intervals. |
@@ -51,11 +52,11 @@ Or you could open HexOps and patch all 15 in 5 minutes.
 
 ## Real Numbers
 
-We use HexOps daily to manage 27 projects across 4 categories:
+We use HexOps daily to manage 32 projects across 4 categories:
 
 | Metric | Value |
 |--------|-------|
-| Projects managed | 27 |
+| Projects managed | 32 |
 | Categories | Client, Internal, Personal, Product |
 | Packages scanned per run | 97+ outdated across 22 projects |
 | Time to patch all projects | ~5 minutes (vs ~2 hours manually) |
@@ -67,7 +68,7 @@ We use HexOps daily to manage 27 projects across 4 categories:
 ## Screenshots
 
 ### Dashboard
-27 projects at a glance. System health gauges, git status, package counts, start/stop any server with one click.
+32 projects at a glance. System health gauges, git status, package counts, start/stop any server with one click.
 
 ![Dashboard](screenshots/dashboard.png)
 
@@ -94,6 +95,7 @@ Every operation logged with timestamps, levels, and categories. Filter by projec
 | Override-aware patching | Yes | No | No | Limited | No |
 | Post-patch audit verify | Yes | No | No | No | Manual |
 | Supply chain scanning | Yes | No | No | No | No |
+| OSV/CVE remediation (CVE Lite) | Yes *(evolving)* | No | No | Limited | No |
 | Code security scanning | Yes | No | No | No | No |
 | Package holds | Yes | No | No | No | N/A |
 | Integrated terminal | Yes | No | Yes | No | N/A |
@@ -200,6 +202,12 @@ HexOps provides full shell access and process control. These are powerful featur
 
 ## Roadmap
 
+### Completed (v0.14.0)
+- [x] CVE Lite dashboard — OSV-backed per-project CVE triage, fix plan, SBOM/SARIF export
+- [x] Concurrent patch scanning — 5 projects in parallel, 10s registry timeout (was serial 30s)
+- [x] Server-side auto-apply gate — all mutation endpoints return 409 when disabled
+- [x] Fleet-wide postcss CVE remediation tooling
+
 ### Completed (v0.13.0)
 - [x] MCP server for Claude Code integration — 16 tools, stdio transport
 - [x] Static code security scanner — 16 grep-based PCRE rules
@@ -217,7 +225,9 @@ HexOps provides full shell access and process control. These are powerful featur
 - [x] Patch trends dashboard
 
 ### Planned
+- [ ] Supply Chain Attack Detection — dependency confusion, compromised maintainer detection, protestware patterns *(next security milestone)*
 - [ ] Pre-patch build validation in isolated worktree
+- [ ] CVE Lite: preview resolved-tree delta before applying overrides
 - [ ] HexOps Agent — dashboard chat UI (Phase 2 of MCP)
 - [ ] Multi-user mode with auth
 - [ ] Docker image for instant setup
@@ -232,7 +242,7 @@ Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## About
 
-Built by [Hexaxia Technologies](https://hexaxia.tech). We manage 27 projects with HexOps every day. It's the tool we wished existed, so we built it.
+Built by [Hexaxia Technologies](https://hexaxia.tech). We manage 32 projects with HexOps every day. It's the tool we wished existed, so we built it.
 
 ## License
 

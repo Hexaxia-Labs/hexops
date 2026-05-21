@@ -1,6 +1,61 @@
 # Security Scanning
 
-HexOps includes two complementary security scanners available in each project's detail view.
+HexOps includes three complementary security layers. CVE Lite is available fleet-wide from the sidebar; the Code Security and Supply Chain scanners are available per-project from the project detail view.
+
+> **Note:** Security features in HexOps are actively evolving. CVE Lite is early access — the scanning pipeline, fix workflows, and artifact formats may change between releases.
+
+## CVE Lite Dashboard
+
+OSV-backed dependency remediation — available at `/security/cve-lite` in the sidebar.
+
+CVE Lite scans a project's dependencies against the [OSV database](https://osv.dev) (an OWASP project), providing structured vulnerability triage and fix guidance beyond what `npm audit` alone covers.
+
+### Running a Scan
+
+Select a project from the dropdown → scan runs automatically (cached 1 hour). Click **Rescan** to force a fresh scan.
+
+### Scan Options
+
+| Option | What It Does |
+|--------|-------------|
+| **Min Severity** | Filter findings below a threshold (low / medium / high / critical) |
+| **Prod Only** | Exclude devDependencies from results |
+| **Imported Only** | Show only packages with detected import usage in source code |
+| **All** | Include all findings regardless of reachability |
+
+Non-default options bypass the 1-hour cache and always trigger a fresh scan.
+
+### Fix Plan
+
+Groups actionable fixes by severity. Each group shows the runnable install command. The **Fix all direct** button runs `cve-lite --fix` to apply all direct-dependency fixes at once.
+
+### Findings Table
+
+| Column | Description |
+|--------|-------------|
+| Package | Dependency name |
+| Version | Currently installed version |
+| Severity | critical / high / medium / low |
+| CVE IDs | Advisory identifiers (OSV, CVE, GHSA) |
+| Fix Version | Validated safe version |
+| Relationship | direct / transitive |
+| Apply | Apply fix through the patch pipeline (transitive deps use `pm override`) |
+
+### Artifacts
+
+| Button | Output |
+|--------|--------|
+| **CycloneDX SBOM** | Software Bill of Materials in CycloneDX JSON format |
+| **SARIF** | Static Analysis Results Interchange Format — import into GitHub Security tab |
+| **Full Report** | Raw CVE Lite JSON output |
+
+### OSV Database Management
+
+The **Manage** panel shows your local OSV DB status (version, last sync). Use **Sync DB** to pull the latest advisories. The DB is shared across all project scans.
+
+### AI Skill Files
+
+**Install Skill** writes Claude Code and AI assistant integration files into the project directory, enabling `/cve-lite` slash command support in that project's AI workflow.
 
 ---
 

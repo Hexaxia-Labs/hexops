@@ -130,6 +130,10 @@ Navigate to `/patches/trends` (or click **Trends** in the Patches header) for:
 
 Cache TTL is 1 hour with up to 15 minutes of jitter to prevent thundering herd across many projects.
 
+### Concurrent Scanning
+
+Force-rescan runs up to 5 projects in parallel (previously serial). Each project emits a progress event as it completes. The `npm/pnpm outdated` registry call has a 10-second timeout per project — slow or unreachable registries no longer block the entire queue for 30 seconds each.
+
 ---
 
 ## .hexops-ignore

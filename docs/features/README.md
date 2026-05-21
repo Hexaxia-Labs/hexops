@@ -7,6 +7,7 @@ Detailed documentation for each HexOps feature.
 - [Dashboard](dashboard.md) - Main overview, system health, project list
 - [Projects](projects.md) - Project management and control panel
 - [Patches](patches.md) - Package updates and vulnerability scanning
+- [Security](security.md) - CVE Lite, code security scanner, supply chain scanner
 - [Terminal](terminal.md) - Integrated shell
 - [Settings](settings.md) - Global and project configuration
 - [Deployments](deployments.md) - Vercel integration
@@ -17,7 +18,8 @@ Detailed documentation for each HexOps feature.
 |---------|-------------|
 | Dashboard | System metrics, project list, quick actions |
 | Projects | Start/stop servers, view logs, manage config |
-| Patches | Scan for outdated packages, batch updates |
+| Patches | Scan for outdated packages, batch updates, concurrent scanning |
+| Security | CVE Lite (OSV), code security scanner, supply chain scanner |
 | Terminal | Full PTY shell in the browser |
 | Settings | Configure paths, git, Vercel integration |
 | Deployments | Deploy to Vercel preview or production |
