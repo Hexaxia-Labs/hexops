@@ -19,6 +19,7 @@ import { buildYarnUpdateCmd } from '@/lib/updaters/yarn';
 import { applyOverrides, removeOverrideConflicts, cleanStaleOverrides } from '@/lib/updaters/override';
 import { installPackages } from '@/lib/updaters/install';
 import { execAsync } from '@/lib/updaters/common';
+import { AUTO_APPLY_ENABLED } from '@/lib/auto-apply-flag';
 
 const NPM_INSTALL_TIMEOUT = 120000;
 
@@ -38,6 +39,13 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    if (!AUTO_APPLY_ENABLED) {
+      return NextResponse.json(
+        { success: false, error: 'Auto-apply is disabled in HexOps. Re-enable AUTO_APPLY_ENABLED to apply updates.' },
+        { status: 409 },
+      );
+    }
+
     const { id } = await params;
     const body: UpdateRequestBody = await request.json().catch(() => ({}));
     const packages = body.packages || [];
