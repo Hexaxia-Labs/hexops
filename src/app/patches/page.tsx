@@ -10,6 +10,7 @@ import { RefreshCw, Shield, Package, ArrowUp, List, FolderTree, ChevronDown, Che
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import type { PatchQueueItem, PatchSummary } from '@/lib/types';
+import type { Finding } from '@/lib/security/types';
 import { DependabotPanel } from '@/components/detail-sections/dependabot-panel';
 import { EscalateModal } from '@/components/escalate-modal';
 import { AcceptedRiskPanel } from '@/components/accepted-risk-panel';
@@ -1702,6 +1703,7 @@ interface PatchRowProps {
 
 function PatchRow({ item, itemKey, isSelected, onToggle, onHold, showProject, onEscalate, onExpandOverrides, onFixOverride, isFixingOverride }: PatchRowProps) {
   const [showDetails, setShowDetails] = useState(false);
+  const [cveLiteFindings, setCveLiteFindings] = useState<Finding[] | null>(null);
   const isTransitive = item.isDirect === false;
   const isHeld = item.isHeld === true;
   const isDisabled = isHeld;
@@ -1713,7 +1715,19 @@ function PatchRow({ item, itemKey, isSelected, onToggle, onHold, showProject, on
 
   const handleInfoClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setShowDetails(!showDetails);
+    const next = !showDetails;
+    setShowDetails(next);
+    if (next && item.type === 'vulnerability' && cveLiteFindings === null) {
+      fetch(`/api/security/findings?project=${encodeURIComponent(item.projectId)}`)
+        .then(r => r.json())
+        .then(data => {
+          const proj = (data.projects ?? []).find(
+            (p: { projectId: string }) => p.projectId === item.projectId
+          );
+          setCveLiteFindings(proj?.findings ?? []);
+        })
+        .catch(() => setCveLiteFindings([]));
+    }
   };
 
   return (
@@ -1896,7 +1910,52 @@ function PatchRow({ item, itemKey, isSelected, onToggle, onHold, showProject, on
 
       {/* Expandable details panel */}
       {showDetails && (
-        <div className="border-t border-zinc-800 bg-zinc-950 px-4 py-3">
+        <div className="border-t border-zinc-800 bg-zinc-950 px-4 py-3 space-y-3">
+          {item.type === 'vulnerability' && (() => {
+            if (cveLiteFindings === null) return null;
+            const matches = cveLiteFindings.filter(
+              f => f.package === item.package && f.type === 'vulnerability'
+            );
+            if (matches.length === 0) return null;
+            return (
+              <div className="border border-zinc-800 rounded-md p-3 space-y-2 text-xs bg-zinc-900/40">
+                <div className="flex items-center justify-between">
+                  <span className="text-zinc-500 uppercase tracking-wider text-[10px]">CVE Lite analysis</span>
+                  <a
+                    href={`/security?project=${encodeURIComponent(item.projectId)}`}
+                    onClick={(e) => e.stopPropagation()}
+                    className="text-purple-400 hover:text-purple-300 text-[10px] flex items-center gap-1"
+                  >
+                    Full analysis in Security →
+                  </a>
+                </div>
+                {matches.map((f, i) => (
+                  <div key={i} className="space-y-1.5">
+                    {f.remediation?.recommendedAction && (
+                      <p className="text-zinc-300">{f.remediation.recommendedAction}</p>
+                    )}
+                    {f.title && (
+                      <p className="text-zinc-500 border-l-2 border-zinc-700 pl-2">{f.title}</p>
+                    )}
+                    {f.remediation?.parentUpgrade && (
+                      <p className="text-zinc-500 text-[10px]">
+                        via <span className="text-purple-400">{f.remediation.parentUpgrade}</span>
+                      </p>
+                    )}
+                    {f.advisoryIds && f.advisoryIds.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {f.advisoryIds.map(id => (
+                          <span key={id} className="bg-purple-500/10 border border-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded text-[10px] font-mono">
+                            {id}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
           <div className="grid grid-cols-2 gap-4 text-xs">
             <div>
               <span className="text-zinc-500">Package:</span>
