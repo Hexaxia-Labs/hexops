@@ -1929,8 +1929,8 @@ function PatchRow({ item, itemKey, isSelected, onToggle, onHold, showProject, on
                     Full analysis in Security →
                   </a>
                 </div>
-                {matches.map((f, i) => (
-                  <div key={i} className="space-y-1.5">
+                {matches.map((f) => (
+                  <div key={f.dedupKey} className="space-y-1.5">
                     {f.remediation?.recommendedAction && (
                       <p className="text-zinc-300">{f.remediation.recommendedAction}</p>
                     )}
