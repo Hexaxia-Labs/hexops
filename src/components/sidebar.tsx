@@ -1,11 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter, useSearchParams, usePathname } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { Package, Plus, TerminalSquare, ScrollText, LayoutDashboard, Settings, Share2, ShieldCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { APP_VERSION } from '@/lib/version';
 import { useSidebar } from '@/contexts/sidebar-context';
+import { useCategory } from '@/contexts/category-context';
 import { NotificationBell } from '@/components/notification-bell';
 
 interface SidebarProps {
@@ -15,18 +16,14 @@ interface SidebarProps {
 
 export function Sidebar({ onAddProject, onOpenShell }: SidebarProps) {
   const { categories, projectCounts, runningCount, totalCount } = useSidebar();
-  const router = useRouter();
+  const { selectedCategory, setSelectedCategory } = useCategory();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
 
-  const selectedCategory = pathname === '/' ? (searchParams.get('category') ?? null) : null;
+  // Category filter only applies on the home page; show no active state elsewhere
+  const activeCategory = pathname === '/' ? selectedCategory : null;
 
   const handleCategoryClick = (category: string | null) => {
-    if (category === null) {
-      router.push('/');
-    } else {
-      router.push(`/?category=${encodeURIComponent(category)}`);
-    }
+    setSelectedCategory(category);
   };
 
   return (
@@ -41,7 +38,7 @@ export function Sidebar({ onAddProject, onOpenShell }: SidebarProps) {
           onClick={() => handleCategoryClick(null)}
           className={cn(
             'w-full text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center justify-between',
-            selectedCategory === null
+            activeCategory === null
               ? 'bg-zinc-800 text-zinc-100'
               : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50'
           )}
@@ -54,7 +51,7 @@ export function Sidebar({ onAddProject, onOpenShell }: SidebarProps) {
           onClick={() => handleCategoryClick('running')}
           className={cn(
             'w-full text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center justify-between',
-            selectedCategory === 'running'
+            activeCategory === 'running'
               ? 'bg-zinc-800 text-zinc-100'
               : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50'
           )}
@@ -70,7 +67,7 @@ export function Sidebar({ onAddProject, onOpenShell }: SidebarProps) {
           onClick={() => handleCategoryClick('stopped')}
           className={cn(
             'w-full text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center justify-between',
-            selectedCategory === 'stopped'
+            activeCategory === 'stopped'
               ? 'bg-zinc-800 text-zinc-100'
               : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50'
           )}
@@ -90,7 +87,7 @@ export function Sidebar({ onAddProject, onOpenShell }: SidebarProps) {
             onClick={() => handleCategoryClick(category)}
             className={cn(
               'w-full text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center justify-between',
-              selectedCategory === category
+              activeCategory === category
                 ? 'bg-zinc-800 text-zinc-100'
                 : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50'
             )}

@@ -3,6 +3,7 @@
 import { ReactNode, useState, useEffect, createContext, useContext, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { SidebarProvider, useSidebar } from '@/contexts/sidebar-context';
+import { CategoryProvider } from '@/contexts/category-context';
 import { Sidebar } from '@/components/sidebar';
 import { AddProjectDialog } from '@/components/add-project-dialog';
 import { ShellPanel } from '@/components/shell-panel';
@@ -111,9 +112,11 @@ function AppShell({ children }: { children: ReactNode }) {
 export function Providers({ children }: ProvidersProps) {
   return (
     <SidebarProvider>
-      <AppShell>
-        {children}
-      </AppShell>
+      <CategoryProvider>
+        <AppShell>
+          {children}
+        </AppShell>
+      </CategoryProvider>
     </SidebarProvider>
   );
 }

@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { useShell } from '@/components/providers';
+import { useCategory } from '@/contexts/category-context';
 import { toast } from 'sonner';
 import { ProjectList } from '@/components/project-list';
 import { ProjectDetail } from '@/components/project-detail';
@@ -26,11 +27,10 @@ type ViewMode = 'list' | 'detail';
 
 function HomeContent() {
   const searchParams = useSearchParams();
-  const router = useRouter();
   const { openShell } = useShell();
+  const { selectedCategory, setSelectedCategory } = useCategory();
   const [projects, setProjects] = useState<Project[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<SortBy>('name');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -40,14 +40,13 @@ function HomeContent() {
   const [detailProjectId, setDetailProjectId] = useState<string | null>(null);
   const [patchStatus, setPatchStatus] = useState<PatchStatus | null>(null);
 
-  // Sync ?project and ?category URL params to local state
+  // Handle ?project=id query param to deep link to project detail
   useEffect(() => {
     const projectId = searchParams.get('project');
     if (projectId) {
       setDetailProjectId(projectId);
       setViewMode('detail');
     }
-    setSelectedCategory(searchParams.get('category') ?? null);
   }, [searchParams]);
 
   const fetchProjects = useCallback(async () => {
@@ -360,7 +359,7 @@ function HomeContent() {
                   return (
                     <button
                       key={cat}
-                      onClick={() => isAll ? router.push('/') : router.push(`/?category=${encodeURIComponent(cat)}`)}
+                      onClick={() => setSelectedCategory(isAll ? null : cat)}
                       className={cn(
                         'shrink-0 px-3 py-2 text-xs font-medium border-b-2 transition-colors capitalize',
                         active
