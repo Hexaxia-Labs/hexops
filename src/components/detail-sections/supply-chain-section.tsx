@@ -11,11 +11,7 @@ const TYPE_LABEL: Record<SupplyChainFindingType, string> = {
   'install-script': 'Install Script',
   'signature-invalid': 'Invalid Signature',
   'typosquat-suspect': 'Typosquat',
-  'dep-confusion': 'Dep Confusion',
-  'manifest-tamper': 'Manifest Tamper',
-  'maintainer-risk': 'Maintainer Risk',
-  'provenance': 'Provenance',
-  'blacklist': 'Blacklist',
+  'no-source': 'No Source',
 };
 
 const SEVERITY_DOT: Record<string, string> = {

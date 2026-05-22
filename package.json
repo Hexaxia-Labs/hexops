@@ -14,12 +14,12 @@
     "build": "next build",
     "start": "next start",
     "lint": "biome lint src",
+    "typecheck": "tsc --noEmit",
     "mcp": "tsx src/mcp/server.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@hexaxia-labs/supply-sentinel": "file:../supply-sentinel",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-scroll-area": "^1.2.10",
