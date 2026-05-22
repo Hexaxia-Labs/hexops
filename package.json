@@ -14,6 +14,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "biome lint src",
+    "typecheck": "tsc --noEmit",
     "mcp": "tsx src/mcp/server.ts",
     "test": "vitest run",
     "test:watch": "vitest"
