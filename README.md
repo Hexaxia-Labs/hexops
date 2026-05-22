@@ -247,6 +247,10 @@ Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 Built by [Hexaxia Technologies](https://hexaxia.tech). We manage 32 projects with HexOps every day. It's the tool we wished existed, so we built it.
 
+## Credits
+
+HexOps's **CVE Lite** scanning is powered by [OWASP cve-lite-cli](https://github.com/OWASP/cve-lite-cli) — a fast, OSV-backed JS/TS dependency vulnerability scanner (an OWASP Incubator Project, MIT, maintained by Sonu Kapoor). HexOps integrates it as one of three sources in its security stack, alongside `pnpm audit` and Grype.
+
 ## License
 
 MIT - see [LICENSE](LICENSE).
