@@ -4,10 +4,13 @@
 
 Manage 5, 15, or 50+ local dev projects from a single web interface. Start/stop servers, batch-patch vulnerabilities, monitor system health, and deploy to Vercel without touching a terminal.
 
+[![CI](https://github.com/Hexaxia-Technologies/hexops/actions/workflows/ci.yml/badge.svg)](https://github.com/Hexaxia-Technologies/hexops/actions/workflows/ci.yml)
+![Version](https://img.shields.io/github/package-json/v/Hexaxia-Technologies/hexops)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-0.20.0-green.svg)
-![Node](https://img.shields.io/badge/node-20%2B-brightgreen.svg)
+![Node](https://img.shields.io/badge/node-24-brightgreen.svg)
 ![Next.js](https://img.shields.io/badge/Next.js-16-black.svg)
+![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)
+![code style: biome](https://img.shields.io/badge/code_style-biome-60a5fa.svg)
 
 ---
 
