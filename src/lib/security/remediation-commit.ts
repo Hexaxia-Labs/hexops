@@ -1,4 +1,5 @@
 import type { FindingRow, FixSeverity } from './cve-lite-view';
+import { FIX_SEVERITY_ORDER } from './cve-lite-view';
 import type { UpdatedPackage } from '@/lib/patch-commit-message';
 
 export interface RemediationCommit {
@@ -10,12 +11,10 @@ export interface RemediationCommit {
   severity?: FixSeverity;
 }
 
-const SEVERITY_ORDER: FixSeverity[] = ['critical', 'high', 'medium', 'low'];
-
 function maxSeverity(severities: FixSeverity[]): FixSeverity | undefined {
   let best: FixSeverity | undefined;
   for (const s of severities) {
-    if (best === undefined || SEVERITY_ORDER.indexOf(s) < SEVERITY_ORDER.indexOf(best)) {
+    if (best === undefined || FIX_SEVERITY_ORDER.indexOf(s) < FIX_SEVERITY_ORDER.indexOf(best)) {
       best = s;
     }
   }
