@@ -12,6 +12,9 @@ export async function POST(
 ) {
   const { id } = await params;
 
+  let source: string | undefined;
+  let advisories: string[] | undefined;
+
   try {
     const project = getProject(id);
 
@@ -24,6 +27,10 @@ export async function POST(
 
     const body = await request.json();
     const message = body.message?.trim();
+    source = typeof body.source === 'string' ? body.source : undefined;
+    advisories = Array.isArray(body.advisories)
+      ? body.advisories.filter((a: unknown): a is string => typeof a === 'string')
+      : undefined;
 
     if (!message) {
       return NextResponse.json(
@@ -65,7 +72,11 @@ export async function POST(
     // Log success
     logger.info('git', 'commit_created', `Committed changes: ${message.split('\n')[0]}`, {
       projectId: id,
-      meta: { message: message.split('\n')[0] },
+      meta: {
+        message: message.split('\n')[0],
+        ...(source ? { source } : {}),
+        ...(advisories ? { advisories } : {}),
+      },
     });
 
     return NextResponse.json({
@@ -79,7 +90,11 @@ export async function POST(
     // Log failure
     logger.error('git', 'commit_failed', `Commit failed: ${errorMessage}`, {
       projectId: id,
-      meta: { error: errorMessage },
+      meta: {
+        error: errorMessage,
+        ...(source ? { source } : {}),
+        ...(advisories ? { advisories } : {}),
+      },
     });
 
     return NextResponse.json(
