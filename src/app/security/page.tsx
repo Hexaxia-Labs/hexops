@@ -206,7 +206,9 @@ function SecurityHubInner() {
       </>
     ),
     run: async () => {
-      const rc = remediationFromRows(rows);
+      // Audit context covers all direct fixable findings — `cve-lite --fix` ignores the
+      // importedOnly/reachability filter, so derive from the unfiltered report, not `rows`.
+      const rc = remediationFromRows(report ? findingRows(report) : []);
       const res = await fetch(`/api/security/cve-lite/${selected}/fix`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode: 'all', auditContext: { source: 'cve-lite', advisories: rc.advisories, severity: rc.severity } }),
