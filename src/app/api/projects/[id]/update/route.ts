@@ -32,6 +32,7 @@ interface UpdateRequestBody {
     fixByParent?: { name: string; version: string };
   }>;
   lockfileResolution?: LockfileResolutionMode;
+  auditContext?: { source?: string; advisories?: string[]; severity?: string };
 }
 
 export async function POST(
@@ -322,6 +323,22 @@ export async function POST(
           }
         }
       } catch { /* non-fatal */ }
+    }
+
+    // Origin-tagged remediation audit trail (e.g. applied from the CVE Lite dashboard).
+    if (anySucceeded && body.auditContext?.source) {
+      const successfulNames = results.filter(r => r.success).map(r => r.package).filter(n => n !== '*');
+      logger.info('patches', 'security_remediation_applied',
+        `Applied security fix in ${id}: ${successfulNames.join(', ') || '(reconcile)'}`,
+        {
+          projectId: id,
+          meta: {
+            source: body.auditContext.source,
+            advisories: body.auditContext.advisories ?? [],
+            severity: body.auditContext.severity,
+            packages: successfulNames,
+          },
+        });
     }
 
     const allSucceeded = results.every(r => r.success);
