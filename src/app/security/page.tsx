@@ -130,11 +130,22 @@ function SecurityHubInner() {
 
   const beginPendingCommit = useCallback(
     async (rc: { packages: UpdatedPackage[]; advisories: string[]; severity?: string }) => {
+      const status = await fetchGitStatus(selected);
+      setGitStatus(status);
+      // An apply can produce nothing to commit: "Fix all direct" (cve-lite --fix) on a
+      // transitive-only advisory is a no-op, and some fixes only touch gitignored node_modules.
+      // Don't open a commit banner that would dead-end on "No changes to commit".
+      if (!status?.dirty) {
+        setPendingCommit(null);
+        setCommitted(false);
+        setError('Fix ran, but there were no file changes to commit. A transitive advisory cannot be fixed by "Fix all direct" — use the per-finding Apply, which adds a package override.');
+        return;
+      }
+      setError(null);
       const generated = generatePatchCommitMessage(rc.packages).full;
       const message = generated || `chore(deps): apply cve-lite fixes in ${selected}`;
       setPendingCommit({ ...rc, message, isEditing: false });
       setCommitted(false);
-      setGitStatus(await fetchGitStatus(selected));
     },
     [selected, fetchGitStatus],
   );
