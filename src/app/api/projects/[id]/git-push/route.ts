@@ -7,10 +7,15 @@ import { logger } from '@/lib/logger';
 const execFileAsync = promisify(execFile);
 
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  const source = typeof body.source === 'string' ? body.source : undefined;
+  const advisories = Array.isArray(body.advisories)
+    ? (body.advisories as unknown[]).filter((a): a is string => typeof a === 'string')
+    : undefined;
 
   try {
     const project = getProject(id);
@@ -36,7 +41,10 @@ export async function POST(
 
       // Remote has commits we don't have (e.g. Dependabot merged between our commit and push).
       // Rebase our patch commit on top of whatever landed remotely, then push again.
-      logger.info('git', 'push_rebase', 'Push rejected (non-fast-forward) — pulling with rebase', { projectId: id });
+      logger.info('git', 'push_rebase', 'Push rejected (non-fast-forward) — pulling with rebase', {
+        projectId: id,
+        meta: { ...(source ? { source } : {}), ...(advisories ? { advisories } : {}) },
+      });
       try {
         await execFileAsync('git', ['pull', '--rebase', '--autostash'], { cwd, timeout: 60000 });
       } catch (pullErr) {
@@ -50,6 +58,7 @@ export async function POST(
     // Log success
     logger.info('git', 'push_completed', 'Pushed changes to remote', {
       projectId: id,
+      meta: { ...(source ? { source } : {}), ...(advisories ? { advisories } : {}) },
     });
 
     return NextResponse.json({
@@ -64,7 +73,11 @@ export async function POST(
     // Log failure
     logger.error('git', 'push_failed', `Push failed: ${errorMessage}`, {
       projectId: id,
-      meta: { error: errorMessage },
+      meta: {
+        error: errorMessage,
+        ...(source ? { source } : {}),
+        ...(advisories ? { advisories } : {}),
+      },
     });
 
     return NextResponse.json(
