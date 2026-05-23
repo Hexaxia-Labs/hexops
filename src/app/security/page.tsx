@@ -16,8 +16,20 @@ import { CveLiteManage } from '@/components/security/cve-lite/cve-lite-manage';
 import { SourceStrip } from '@/components/security/source-strip';
 import { ConfirmDialog } from '@/components/security/cve-lite/confirm-dialog';
 import { AUTO_APPLY_ENABLED } from '@/lib/auto-apply-flag';
+import type { UpdatedPackage } from '@/lib/patch-commit-message';
+import { generatePatchCommitMessage } from '@/lib/patch-commit-message';
+import { remediationFromRow, remediationFromRows } from '@/lib/security/remediation-commit';
+import { PendingCommitBanner } from '@/components/security/cve-lite/pending-commit-banner';
 
 interface ConfirmState { title: string; body: ReactNode; run: () => Promise<void> }
+interface GitStatus { branch: string; ahead: number; behind: number; dirty: boolean }
+interface PendingCommit {
+  packages: UpdatedPackage[];
+  advisories: string[];
+  severity?: string;
+  message: string;
+  isEditing: boolean;
+}
 
 function SecurityHubInner() {
   const searchParams = useSearchParams();
@@ -35,6 +47,11 @@ function SecurityHubInner() {
   const [dbStatus, setDbStatus] = useState<DbStatus | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pendingCommit, setPendingCommit] = useState<PendingCommit | null>(null);
+  const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
+  const [isCommitting, setIsCommitting] = useState(false);
+  const [isPushing, setIsPushing] = useState(false);
+  const [committed, setCommitted] = useState(false);
 
   const refreshRail = useCallback(() => {
     fetch('/api/security/cve-lite/summary')
@@ -100,6 +117,74 @@ function SecurityHubInner() {
 
   useEffect(() => { load(false); }, [load]);
 
+  const fetchGitStatus = useCallback(async (projectId: string): Promise<GitStatus | null> => {
+    try {
+      const res = await fetch(`/api/projects/${projectId}/git`);
+      if (!res.ok) return null;
+      const d = await res.json();
+      return { branch: d.branch ?? '', ahead: d.aheadCount ?? 0, behind: d.behindCount ?? 0, dirty: !!d.isDirty };
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const beginPendingCommit = useCallback(
+    async (rc: { packages: UpdatedPackage[]; advisories: string[]; severity?: string }) => {
+      const generated = generatePatchCommitMessage(rc.packages).full;
+      const message = generated || `chore(deps): apply cve-lite fixes in ${selected}`;
+      setPendingCommit({ ...rc, message, isEditing: false });
+      setCommitted(false);
+      setGitStatus(await fetchGitStatus(selected));
+    },
+    [selected, fetchGitStatus],
+  );
+
+  const handleCommit = useCallback(async () => {
+    if (!pendingCommit) return;
+    setIsCommitting(true); setError(null);
+    try {
+      const res = await fetch(`/api/projects/${selected}/git-commit`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: pendingCommit.message, source: 'cve-lite', advisories: pendingCommit.advisories }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false) throw new Error(data.error ?? `commit failed (HTTP ${res.status})`);
+      setCommitted(true);
+      setPendingCommit((pc) => (pc ? { ...pc, isEditing: false } : pc));
+      setGitStatus(await fetchGitStatus(selected));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'commit failed');
+    } finally {
+      setIsCommitting(false);
+    }
+  }, [pendingCommit, selected, fetchGitStatus]);
+
+  const handlePush = useCallback(async () => {
+    if (!pendingCommit) return;
+    setIsPushing(true); setError(null);
+    try {
+      const res = await fetch(`/api/projects/${selected}/git-push`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: 'cve-lite', advisories: pendingCommit.advisories }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false) throw new Error(data.error ?? `push failed (HTTP ${res.status})`);
+      setPendingCommit(null); setCommitted(false);
+      setGitStatus(await fetchGitStatus(selected));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'push failed');
+    } finally {
+      setIsPushing(false);
+    }
+  }, [pendingCommit, selected, fetchGitStatus]);
+
+  // Clear any pending commit when the user switches projects.
+  useEffect(() => {
+    setPendingCommit(null);
+    setCommitted(false);
+    setGitStatus(null);
+  }, [selected]);
+
   const runConfirmed = async () => {
     if (!confirm) return;
     setBusy(true); setError(null);
@@ -121,13 +206,15 @@ function SecurityHubInner() {
       </>
     ),
     run: async () => {
+      const rc = remediationFromRows(rows);
       const res = await fetch(`/api/security/cve-lite/${selected}/fix`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'all' }),
+        body: JSON.stringify({ mode: 'all', auditContext: { source: 'cve-lite', advisories: rc.advisories, severity: rc.severity } }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) throw new Error(data.error ?? data.summary ?? `fix failed (HTTP ${res.status})`);
       await load(true);
+      await beginPendingCommit(rc);
     },
   });
 
@@ -140,6 +227,7 @@ function SecurityHubInner() {
       </>
     ),
     run: async () => {
+      const rc = remediationFromRow(row);
       const res = await fetch(`/api/projects/${selected}/update`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -149,6 +237,7 @@ function SecurityHubInner() {
             toVersion: row.validatedFixVersion,
             fixViaOverride: row.relationship === 'transitive',
           }],
+          auditContext: { source: 'cve-lite', advisories: rc.advisories, severity: rc.severity },
         }),
       });
       if (!res.ok) {
@@ -156,6 +245,7 @@ function SecurityHubInner() {
         throw new Error(e.error ?? `update failed (HTTP ${res.status})`);
       }
       await load(true);
+      await beginPendingCommit(rc);
     },
   });
 
@@ -215,6 +305,22 @@ function SecurityHubInner() {
             onRescan={() => load(true)}
           />
         </div>
+        {pendingCommit && AUTO_APPLY_ENABLED && (
+          <PendingCommitBanner
+            packages={pendingCommit.packages}
+            message={pendingCommit.message}
+            isEditing={pendingCommit.isEditing}
+            ahead={gitStatus?.ahead ?? 0}
+            committed={committed}
+            isCommitting={isCommitting}
+            isPushing={isPushing}
+            onMessageChange={(msg) => setPendingCommit((pc) => (pc ? { ...pc, message: msg } : pc))}
+            onToggleEdit={() => setPendingCommit((pc) => (pc ? { ...pc, isEditing: !pc.isEditing } : pc))}
+            onCommit={handleCommit}
+            onPush={handlePush}
+            onDismiss={() => { setPendingCommit(null); setCommitted(false); }}
+          />
+        )}
         {loading && <div className="text-sm text-zinc-500">Scanning…</div>}
         {error && <div className="text-sm text-red-400">{error}</div>}
         {!loading && !error && visibleReport && (
