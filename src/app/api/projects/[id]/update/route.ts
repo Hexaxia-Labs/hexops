@@ -20,6 +20,7 @@ import { applyOverrides, removeOverrideConflicts, cleanStaleOverrides } from '@/
 import { installPackages } from '@/lib/updaters/install';
 import { execAsync } from '@/lib/updaters/common';
 import { AUTO_APPLY_ENABLED } from '@/lib/auto-apply-flag';
+import { runWithDevServerGuard } from '@/lib/process-manager';
 
 const NPM_INSTALL_TIMEOUT = 120000;
 
@@ -54,6 +55,10 @@ export async function POST(
     const project = getProject(id);
     if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 });
 
+    // #109: if this project's dev server is live, stop it before churning
+    // node_modules and restart it after; refuse outright if the target is
+    // hexops itself (we'd kill the server serving this request mid-apply).
+    const runApply = async (): Promise<{ status?: number; body: Record<string, unknown> }> => {
     const cwd = project.path;
 
     const projectSettings = getProjectSettings(id);
@@ -67,11 +72,7 @@ export async function POST(
 
     const resolution = await resolveLockfile(cwd, resolutionMode);
     if (!resolution.success) {
-      return NextResponse.json({
-        success: false,
-        error: `Lockfile resolution (${resolutionMode}) failed`,
-        resolution,
-      }, { status: 500 });
+      return { status: 500, body: { success: false, error: `Lockfile resolution (${resolutionMode}) failed`, resolution } };
     }
 
     const packageManager = resolution.packageManager;
@@ -344,13 +345,33 @@ export async function POST(
     const allSucceeded = results.every(r => r.success);
     const output = results.map(r => r.output).join('\n\n');
 
-    return NextResponse.json({
+    return { body: {
       success: allSucceeded,
       packageManager,
       results,
       output: output || 'Packages updated successfully.',
       ...(auditSummary !== undefined && { auditSummary }),
-    });
+    } };
+    };
+
+    const outcome = await runWithDevServerGuard(project, runApply, { clearBuildDir: true });
+    if (outcome.blocked) {
+      return NextResponse.json(
+        { success: false, error: outcome.reason, devServerGuard: { action: outcome.decision, reason: outcome.reason } },
+        { status: 409 },
+      );
+    }
+    const devServerGuard = {
+      action: outcome.decision,
+      stopped: outcome.stopped,
+      restarted: outcome.restarted,
+      ...(outcome.restartError ? { restartError: outcome.restartError } : {}),
+    };
+    const applied = outcome.result!;
+    return NextResponse.json(
+      { ...applied.body, devServerGuard },
+      applied.status ? { status: applied.status } : undefined,
+    );
   } catch (error) {
     console.error('Error updating packages:', error);
     const execError = error as { stdout?: string; stderr?: string; message?: string };

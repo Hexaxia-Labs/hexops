@@ -9,6 +9,7 @@ import { join } from 'path'
 import { execFile, exec } from 'child_process'
 import { promisify } from 'util'
 import { logger } from '@/lib/logger'
+import { decideDevServerGuard, isHexopsSelf, isTracked } from '@/lib/process-manager'
 
 const execFileAsync = promisify(execFile)
 const execAsync = promisify(exec)
@@ -56,6 +57,17 @@ export async function POST(
 
     if (!project) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    }
+
+    // #109: an escalation rewrites overrides and reinstalls. Refuse if the target
+    // is hexops itself — churning node_modules would kill the server serving this
+    // request mid-install. (Orchestrated stop/restart for other projects: TODO.)
+    const guard = decideDevServerGuard({ isSelf: isHexopsSelf(project), isTracked: isTracked(id) })
+    if (guard.action === 'block-self') {
+      return NextResponse.json(
+        { error: guard.reason, devServerGuard: { action: guard.action, reason: guard.reason } },
+        { status: 409 },
+      )
     }
 
     const body: EscalateRequestBody = await request.json()
