@@ -75,6 +75,25 @@ function addLogEntry(projectId: string, type: 'stdout' | 'stderr', message: stri
 
 export type StartMode = 'dev' | 'prod';
 
+/**
+ * Build a child project's environment without hexops's own bundler env.
+ *
+ * hexops itself runs on Turbopack, so its `process.env` carries `TURBOPACK=1`.
+ * If that leaks into a managed project, any project whose dev/build script uses
+ * `--webpack` fails with "Multiple bundler flags set: TURBOPACK=1, --webpack"
+ * and exits 1 — but only when launched by hexops, not from a plain shell, which
+ * makes it look like a flaky start path. A project that wants Turbopack still
+ * gets it via Next's default or its own `--turbopack`/`.env`, so dropping the
+ * inherited flag is safe. (#111)
+ */
+export function withoutInheritedBundlerEnv(
+  env: Record<string, string | undefined>
+): Record<string, string | undefined> {
+  const rest = { ...env };
+  delete rest.TURBOPACK;
+  return rest;
+}
+
 export function startProject(
   project: ProjectConfig,
   mode: StartMode = 'dev'
@@ -109,7 +128,7 @@ export function startProject(
           shell: true,
           stdio: 'pipe',
           env: {
-            ...process.env,
+            ...withoutInheritedBundlerEnv(process.env),
             ...loadProjectEnvFile(project.path),
             NODE_ENV: 'production',
           },
@@ -147,7 +166,7 @@ export function startProject(
       shell: projectSettings.shell ?? true,
       detached: false,
       env: {
-        ...process.env,
+        ...withoutInheritedBundlerEnv(process.env),
         ...projectFileEnv,
         ...projectEnv,
         PORT: project.port.toString(),
