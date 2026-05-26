@@ -13,8 +13,11 @@ import { CveLiteFindings } from '@/components/security/cve-lite/cve-lite-finding
 import { CveLiteToolbar } from '@/components/security/cve-lite/cve-lite-toolbar';
 import { CveLiteScanControls } from '@/components/security/cve-lite/cve-lite-scan-controls';
 import { CveLiteManage } from '@/components/security/cve-lite/cve-lite-manage';
-import { SourceStrip } from '@/components/security/source-strip';
 import { ConfirmDialog } from '@/components/security/cve-lite/confirm-dialog';
+import { SecurityHeader } from '@/components/security/security-header';
+import { SecuritySummaryBar } from '@/components/security/security-summary-bar';
+import { SourcePluginCards } from '@/components/security/source-plugin-cards';
+import type { PluginCardEntry } from '@/lib/security/plugins/runner';
 import { AUTO_APPLY_ENABLED } from '@/lib/auto-apply-flag';
 import type { UpdatedPackage } from '@/lib/patch-commit-message';
 import { generatePatchCommitMessage } from '@/lib/patch-commit-message';
@@ -52,6 +55,7 @@ function SecurityHubInner() {
   const [isCommitting, setIsCommitting] = useState(false);
   const [isPushing, setIsPushing] = useState(false);
   const [committed, setCommitted] = useState(false);
+  const [pluginEntries, setPluginEntries] = useState<PluginCardEntry[]>([]);
 
   const refreshRail = useCallback(() => {
     fetch('/api/security/cve-lite/summary')
@@ -116,6 +120,45 @@ function SecurityHubInner() {
   }, [selected, options, refreshRail]);
 
   useEffect(() => { load(false); }, [load]);
+
+  // Fetch plugin status when project changes
+  useEffect(() => {
+    if (!selected) {
+      setPluginEntries([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const listRes = await fetch('/api/security/plugins');
+        if (!listRes.ok) return;
+        const listJson = await listRes.json();
+        const plugins: Array<{ id: string; name: string; kind: PluginCardEntry['kind']; detailRoute?: string }>
+          = listJson.plugins ?? [];
+        const entries = await Promise.all(
+          plugins.map(async (p) => {
+            const r = await fetch(`/api/security/plugins/${p.id}/status?projectId=${encodeURIComponent(selected)}`);
+            if (!r.ok) return null;
+            const j = await r.json();
+            return {
+              pluginId: j.pluginId,
+              name: p.name,
+              kind: p.kind,
+              host: j.host,
+              card: j.card,
+              detailRoute: p.detailRoute,
+            } as PluginCardEntry;
+          }),
+        );
+        if (!cancelled) {
+          setPluginEntries(entries.filter((e): e is PluginCardEntry => e !== null));
+        }
+      } catch {
+        if (!cancelled) setPluginEntries([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selected]);
 
   const fetchGitStatus = useCallback(async (projectId: string): Promise<GitStatus | null> => {
     try {
@@ -284,6 +327,21 @@ function SecurityHubInner() {
   const rows = visibleReport ? findingRows(visibleReport) : [];
   const selectedSources = allSources[selected] ?? {};
 
+  // Severity counts for the summary bar — derived from the current cve-lite report
+  const severityCounts = {
+    critical: 0, high: 0, medium: 0, low: 0, info: 0,
+  };
+  for (const f of visibleReport?.findings ?? []) {
+    const sev = (f.severity ?? '').toLowerCase();
+    if (sev === 'critical') severityCounts.critical++;
+    else if (sev === 'high') severityCounts.high++;
+    else if (sev === 'medium' || sev === 'moderate') severityCounts.medium++;
+    else if (sev === 'low') severityCounts.low++;
+    else severityCounts.info++;
+  }
+  const findingsCount = severityCounts.critical + severityCounts.high + severityCounts.medium + severityCounts.low;
+  const sourcesCount = Object.keys(selectedSources).length + pluginEntries.length;
+
   return (
     <div className="flex" style={{ minHeight: 'calc(100vh - 4rem)' }}>
       <FleetProjectRail
@@ -291,73 +349,85 @@ function SecurityHubInner() {
         selected={selected}
         onSelect={setSelected}
       />
-      <div className="flex-1 overflow-auto p-6 space-y-4">
-        <CveLiteToolbar
-          hideSelector
-          projectId={selected}
-          projects={[]}
-          selected={selected}
-          onSelect={setSelected}
-          scannedAt={scannedAt}
-          importedOnly={importedOnly}
-          onToggleImported={setImportedOnly}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* NEW chrome — full-width, mirrors Patches */}
+        <SecurityHeader
+          findingsCount={findingsCount}
+          sourcesCount={sourcesCount}
+          lastScan={scannedAt ?? undefined}
+          scanning={loading}
           onRescan={() => load(true)}
         />
-        <CveLiteScanControls options={options} onChange={setOptions} />
-        <div className="flex items-center gap-4 flex-wrap text-xs border border-zinc-800 rounded-md px-3 py-2 bg-zinc-900/30">
-          <CveLiteManage
+        <SecuritySummaryBar counts={severityCounts} />
+        <SourcePluginCards
+          sources={selectedSources}
+          plugins={pluginEntries}
+          sourceDeepLinks={{ 'cve-lite': '/security' }}
+        />
+
+        {/* Existing content — kept verbatim, just moved into a padded scroll container */}
+        <div className="flex-1 overflow-auto p-6 space-y-4">
+          <CveLiteToolbar
+            hideSelector
             projectId={selected}
-            dbStatus={dbStatus}
-            onSynced={setDbStatus}
-            onInstallSkill={installSkill}
-          />
-          <span className="text-zinc-700 hidden sm:inline">|</span>
-          <SourceStrip
-            projectId={selected}
-            sources={selectedSources}
+            projects={[]}
+            selected={selected}
+            onSelect={setSelected}
+            scannedAt={scannedAt}
+            importedOnly={importedOnly}
+            onToggleImported={setImportedOnly}
             onRescan={() => load(true)}
           />
+          <CveLiteScanControls options={options} onChange={setOptions} />
+          <div className="flex items-center gap-4 flex-wrap text-xs border border-zinc-800 rounded-md px-3 py-2 bg-zinc-900/30">
+            <CveLiteManage
+              projectId={selected}
+              dbStatus={dbStatus}
+              onSynced={setDbStatus}
+              onInstallSkill={installSkill}
+            />
+          </div>
+          {pendingCommit && AUTO_APPLY_ENABLED && (
+            <PendingCommitBanner
+              packages={pendingCommit.packages}
+              message={pendingCommit.message}
+              isEditing={pendingCommit.isEditing}
+              ahead={gitStatus?.ahead ?? 0}
+              committed={committed}
+              isCommitting={isCommitting}
+              isPushing={isPushing}
+              onMessageChange={(msg) => setPendingCommit((pc) => (pc ? { ...pc, message: msg } : pc))}
+              onToggleEdit={() => setPendingCommit((pc) => (pc ? { ...pc, isEditing: !pc.isEditing } : pc))}
+              onCommit={handleCommit}
+              onPush={handlePush}
+              onDismiss={() => { setPendingCommit(null); setCommitted(false); }}
+            />
+          )}
+          {loading && <div className="text-sm text-zinc-500">Scanning…</div>}
+          {error && <div className="text-sm text-red-400">{error}</div>}
+          {!loading && !error && visibleReport && (
+            <>
+              <section>
+                <h2 className="text-sm font-medium text-zinc-300 mb-2">Fix plan</h2>
+                <FixPlan groups={groups} onFixAll={AUTO_APPLY_ENABLED ? fixAll : undefined} fixingAll={busy} />
+              </section>
+              <section>
+                <h2 className="text-sm font-medium text-zinc-300 mb-2">Findings</h2>
+                <CveLiteFindings rows={rows} onApply={AUTO_APPLY_ENABLED ? applyOne : undefined} />
+              </section>
+            </>
+          )}
+          {confirm && (
+            <ConfirmDialog
+              open
+              title={confirm.title}
+              body={confirm.body}
+              busy={busy}
+              onConfirm={runConfirmed}
+              onCancel={() => setConfirm(null)}
+            />
+          )}
         </div>
-        {pendingCommit && AUTO_APPLY_ENABLED && (
-          <PendingCommitBanner
-            packages={pendingCommit.packages}
-            message={pendingCommit.message}
-            isEditing={pendingCommit.isEditing}
-            ahead={gitStatus?.ahead ?? 0}
-            committed={committed}
-            isCommitting={isCommitting}
-            isPushing={isPushing}
-            onMessageChange={(msg) => setPendingCommit((pc) => (pc ? { ...pc, message: msg } : pc))}
-            onToggleEdit={() => setPendingCommit((pc) => (pc ? { ...pc, isEditing: !pc.isEditing } : pc))}
-            onCommit={handleCommit}
-            onPush={handlePush}
-            onDismiss={() => { setPendingCommit(null); setCommitted(false); }}
-          />
-        )}
-        {loading && <div className="text-sm text-zinc-500">Scanning…</div>}
-        {error && <div className="text-sm text-red-400">{error}</div>}
-        {!loading && !error && visibleReport && (
-          <>
-            <section>
-              <h2 className="text-sm font-medium text-zinc-300 mb-2">Fix plan</h2>
-              <FixPlan groups={groups} onFixAll={AUTO_APPLY_ENABLED ? fixAll : undefined} fixingAll={busy} />
-            </section>
-            <section>
-              <h2 className="text-sm font-medium text-zinc-300 mb-2">Findings</h2>
-              <CveLiteFindings rows={rows} onApply={AUTO_APPLY_ENABLED ? applyOne : undefined} />
-            </section>
-          </>
-        )}
-        {confirm && (
-          <ConfirmDialog
-            open
-            title={confirm.title}
-            body={confirm.body}
-            busy={busy}
-            onConfirm={runConfirmed}
-            onCancel={() => setConfirm(null)}
-          />
-        )}
       </div>
     </div>
   );
