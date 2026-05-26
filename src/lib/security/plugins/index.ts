@@ -1,4 +1,5 @@
 import type { SecurityPlugin } from './types';
+import { SafeChainPlugin } from './safe-chain/plugin';
 
 /**
  * Static plugin registry.
@@ -10,7 +11,7 @@ import type { SecurityPlugin } from './types';
  *
  * Order is the on-screen order of the cards.
  */
-export const SECURITY_PLUGINS: ReadonlyArray<SecurityPlugin> = [];
+export const SECURITY_PLUGINS: ReadonlyArray<SecurityPlugin> = [SafeChainPlugin];
 
 export function getPlugin(id: string): SecurityPlugin | undefined {
   return SECURITY_PLUGINS.find((p) => p.id === id);
