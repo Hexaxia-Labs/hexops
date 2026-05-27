@@ -37,6 +37,7 @@ interface PendingCommit {
 export interface ProjectSecurityAccordionProps {
   project: { id: string; name: string };
   sources: Record<string, SourceResult>;
+  severity?: { critical: number; high: number; medium: number; low: number; info?: number };
   startsExpanded?: boolean;
   onAnyDataChanged?: () => void;
 }
@@ -44,6 +45,7 @@ export interface ProjectSecurityAccordionProps {
 export function ProjectSecurityAccordion({
   project,
   sources,
+  severity,
   startsExpanded = false,
   onAnyDataChanged,
 }: ProjectSecurityAccordionProps) {
@@ -327,6 +329,10 @@ export function ProjectSecurityAccordion({
     ? (visibleReport?.findings ?? []).length
     : Object.values(sources).reduce((sum, s) => sum + s.findingCount, 0);
 
+  // Compute severity pill total from severity prop (critical + high + medium + low; ignore info)
+  const sev = severity;
+  const totalSev = sev ? sev.critical + sev.high + sev.medium + sev.low : 0;
+
   return (
     <div className="border border-zinc-800 rounded-lg overflow-hidden">
       {/* Header row — always visible */}
@@ -343,15 +349,34 @@ export function ProjectSecurityAccordion({
             }
           </button>
           <span className="font-medium text-zinc-200">{project.name}</span>
-          {totalFindings > 0 ? (
-            <Badge variant="outline" className="text-xs border-zinc-700 text-zinc-500">
-              {totalFindings} finding{totalFindings !== 1 ? 's' : ''}
-            </Badge>
-          ) : (
+          {sev && totalSev > 0 ? (
+            <div className="flex items-center gap-1.5">
+              {sev.critical > 0 && (
+                <Badge variant="outline" className="text-xs border-red-500/30 text-red-400 bg-red-500/10">
+                  {sev.critical} critical
+                </Badge>
+              )}
+              {sev.high > 0 && (
+                <Badge variant="outline" className="text-xs border-orange-500/30 text-orange-400 bg-orange-500/10">
+                  {sev.high} high
+                </Badge>
+              )}
+              {sev.medium > 0 && (
+                <Badge variant="outline" className="text-xs border-yellow-500/30 text-yellow-400 bg-yellow-500/10">
+                  {sev.medium} medium
+                </Badge>
+              )}
+              {sev.low > 0 && (
+                <Badge variant="outline" className="text-xs border-zinc-500/30 text-zinc-400 bg-zinc-500/10">
+                  {sev.low} low
+                </Badge>
+              )}
+            </div>
+          ) : sev && totalSev === 0 ? (
             <Badge variant="outline" className="text-xs border-green-500/30 text-green-400 bg-green-500/10">
               ✓ Clean
             </Badge>
-          )}
+          ) : null}
         </div>
         <div className="flex items-center gap-2">
           <Button

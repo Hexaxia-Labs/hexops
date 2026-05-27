@@ -14,12 +14,16 @@ interface FleetScanState {
   inflight: boolean;
 }
 
+type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info';
+type SeverityCounts = Record<Severity, number>;
+
 function SecurityHubInner() {
   const searchParams = useSearchParams();
   const initialProject = searchParams.get('project') ?? '';
 
   const [projects, setProjects] = useState<Array<{ id: string; name: string }>>([]);
   const [perProjectSources, setPerProjectSources] = useState<Record<string, Record<string, SourceResult>>>({});
+  const [perProjectSeverity, setPerProjectSeverity] = useState<Record<string, SeverityCounts>>({});
   const [allFindingsSeverity, setAllFindingsSeverity] = useState<{
     critical: number; high: number; medium: number; low: number; info: number;
   }>({ critical: 0, high: 0, medium: 0, low: 0, info: 0 });
@@ -40,21 +44,25 @@ function SecurityHubInner() {
       );
       setProjects(ps);
 
-      // Per-project source map for the accordion headers
+      // Per-project source map for the accordion headers, and per-project severity counts
       const sourcesMap: Record<string, Record<string, SourceResult>> = {};
+      const perProj: Record<string, SeverityCounts> = {};
       const sev = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
       for (const p of (findingsRes as { projects?: Array<{ projectId: string; sources?: Record<string, SourceResult>; findings?: Array<{ severity?: string }> }> }).projects ?? []) {
         sourcesMap[p.projectId] = p.sources ?? {};
+        const c: SeverityCounts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
         for (const f of p.findings ?? []) {
           const s = (f.severity ?? '').toLowerCase();
-          if (s === 'critical') sev.critical++;
-          else if (s === 'high') sev.high++;
-          else if (s === 'medium' || s === 'moderate') sev.medium++;
-          else if (s === 'low') sev.low++;
-          else sev.info++;
+          if (s === 'critical') { c.critical++; sev.critical++; }
+          else if (s === 'high') { c.high++; sev.high++; }
+          else if (s === 'medium' || s === 'moderate') { c.medium++; sev.medium++; }
+          else if (s === 'low') { c.low++; sev.low++; }
+          else { c.info++; sev.info++; }
         }
+        perProj[p.projectId] = c;
       }
       setPerProjectSources(sourcesMap);
+      setPerProjectSeverity(perProj);
       setAllFindingsSeverity(sev);
     } catch {
       // best-effort — leave previous state intact on network error
@@ -185,6 +193,7 @@ function SecurityHubInner() {
               key={p.id}
               project={p}
               sources={perProjectSources[p.id] ?? {}}
+              severity={perProjectSeverity[p.id]}
               startsExpanded={p.id === initialProject}
               onAnyDataChanged={refresh}
             />
