@@ -178,7 +178,11 @@ function FindingRow({ finding: f, findingState }: { finding: Finding; findingSta
           </span>
         )}
         <span className="opacity-75">{f.sources.join(' + ')}</span>
-        {f.fixedIn && <span className="text-zinc-400">fix: {f.fixedIn}</span>}
+        {f.fixedIn && (
+          <span className="shrink-0 px-1.5 py-0.5 rounded border border-cyan-500/30 text-cyan-300 bg-cyan-500/10 text-[0.7rem]">
+            fix: {f.fixedIn}
+          </span>
+        )}
         {firstSeenLabel && (
           <span className="text-zinc-500 shrink-0 text-[0.7rem]">first seen {firstSeenLabel}</span>
         )}
@@ -266,7 +270,11 @@ function PackageRow({
           <span>{total} CVE{total !== 1 ? 's' : ''}</span>
           <span>·</span>
           <span className="opacity-75">{group.sourcesUnion.join(' + ')}</span>
-          {group.fixedIn && <span className="text-zinc-400">fix: {group.fixedIn}</span>}
+          {group.fixedIn && (
+            <span className="shrink-0 px-1.5 py-0.5 rounded border border-cyan-500/30 text-cyan-300 bg-cyan-500/10 text-xs">
+              fix: {group.fixedIn}
+            </span>
+          )}
           {onFileException && group.parentPackage && (
             <button
               type="button"
