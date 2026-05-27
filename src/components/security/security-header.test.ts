@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { SecurityHeader, type SecurityHeaderProps } from './security-header';
+import { SecurityHeader, type SecurityHeaderProps, type ScanSourceId, type ScanMeter, type OsvDbStatus } from './security-header';
 
 describe('SecurityHeader', () => {
   it('exports SecurityHeader as a function component', () => {
@@ -12,7 +12,7 @@ describe('SecurityHeader', () => {
       sourcesCount: 2,
       lastScan: '2026-05-26T15:00:00Z',
       scanning: false,
-      onRescan: () => {},
+      onScan: () => {},
     };
     expect(props.findingsCount).toBe(3);
     expect(props.sourcesCount).toBe(2);
@@ -26,7 +26,7 @@ describe('SecurityHeader', () => {
       sourcesCount: 0,
       lastScan: undefined,
       scanning: false,
-      onRescan: () => {},
+      onScan: () => {},
     };
     expect(props.lastScan).toBeUndefined();
   });
@@ -37,32 +37,9 @@ describe('SecurityHeader', () => {
       sourcesCount: 1,
       lastScan: undefined,
       scanning: true,
-      onRescan: () => {},
+      onScan: () => {},
     };
     expect(props.scanning).toBe(true);
-  });
-
-  it('accepts optional scanProgress prop', () => {
-    const propsInFlight: SecurityHeaderProps = {
-      findingsCount: 0,
-      sourcesCount: 0,
-      lastScan: undefined,
-      scanning: true,
-      scanProgress: { done: 5, total: 31 },
-      onRescan: () => {},
-    };
-    expect(propsInFlight.scanProgress?.done).toBe(5);
-    expect(propsInFlight.scanProgress?.total).toBe(31);
-
-    const propsNull: SecurityHeaderProps = {
-      findingsCount: 0,
-      sourcesCount: 0,
-      lastScan: undefined,
-      scanning: false,
-      scanProgress: null,
-      onRescan: () => {},
-    };
-    expect(propsNull.scanProgress).toBeNull();
   });
 
   it('accepts optional projectCount prop for empty-state copy', () => {
@@ -72,39 +49,111 @@ describe('SecurityHeader', () => {
       lastScan: undefined,
       scanning: false,
       projectCount: 12,
-      onRescan: () => {},
+      onScan: () => {},
     };
     expect(props.projectCount).toBe(12);
-    // When findingsCount===0 and lastScan is undefined, the component should show
-    // "{projectCount} projects · no scans cached yet" — verified structurally here.
     expect(props.findingsCount).toBe(0);
     expect(props.lastScan).toBeUndefined();
   });
 
-  it('scanProgress null leaves subtitle in normal or empty-state mode', () => {
-    // Explicitly null scanProgress + no findings + no lastScan → empty-state
-    const emptyState: SecurityHeaderProps = {
+  it('accepts meters prop with per-source ScanMeter values', () => {
+    const meter: ScanMeter = { done: 5, total: 31, active: 2 };
+    const props: SecurityHeaderProps = {
+      findingsCount: 0,
+      sourcesCount: 0,
+      lastScan: undefined,
+      scanning: true,
+      meters: {
+        'pnpm-audit': meter,
+        'grype': { done: 0, total: 31, active: 3 },
+      },
+      onScan: () => {},
+    };
+    expect(props.meters?.['pnpm-audit']?.done).toBe(5);
+    expect(props.meters?.['pnpm-audit']?.total).toBe(31);
+    expect(props.meters?.['pnpm-audit']?.active).toBe(2);
+    expect(props.meters?.['grype']?.done).toBe(0);
+    expect(props.meters?.['cve-lite']).toBeUndefined();
+  });
+
+  it('accepts partial meters (single-source scan)', () => {
+    const props: SecurityHeaderProps = {
+      findingsCount: 0,
+      sourcesCount: 0,
+      lastScan: undefined,
+      scanning: true,
+      meters: {
+        'cve-lite': { done: 10, total: 20, active: 1 },
+      },
+      onScan: () => {},
+    };
+    expect(props.meters?.['cve-lite']?.done).toBe(10);
+    expect(props.meters?.['pnpm-audit']).toBeUndefined();
+    expect(props.meters?.['grype']).toBeUndefined();
+  });
+
+  it('accepts osv prop with lastSync timestamp', () => {
+    const osv: OsvDbStatus = { lastSync: '2026-05-27T00:00:00Z' };
+    const props: SecurityHeaderProps = {
       findingsCount: 0,
       sourcesCount: 0,
       lastScan: undefined,
       scanning: false,
-      scanProgress: null,
-      projectCount: 5,
-      onRescan: () => {},
+      osv,
+      onScan: () => {},
     };
-    expect(emptyState.scanProgress).toBeNull();
-    expect(emptyState.projectCount).toBe(5);
+    expect(props.osv?.lastSync).toBe('2026-05-27T00:00:00Z');
+  });
 
-    // Explicitly null scanProgress + findings present → normal subtitle
-    const normalState: SecurityHeaderProps = {
-      findingsCount: 10,
-      sourcesCount: 2,
-      lastScan: '2026-05-26T15:00:00Z',
+  it('accepts osv prop with undefined lastSync (never synced)', () => {
+    const osv: OsvDbStatus = {};
+    const props: SecurityHeaderProps = {
+      findingsCount: 0,
+      sourcesCount: 0,
+      lastScan: undefined,
       scanning: false,
-      scanProgress: null,
-      onRescan: () => {},
+      osv,
+      onScan: () => {},
     };
-    expect(normalState.findingsCount).toBe(10);
-    expect(normalState.scanProgress).toBeNull();
+    expect(props.osv?.lastSync).toBeUndefined();
+  });
+
+  it('accepts syncingOsv and onSyncOsv props', () => {
+    const onSyncOsv = () => {};
+    const props: SecurityHeaderProps = {
+      findingsCount: 0,
+      sourcesCount: 0,
+      lastScan: undefined,
+      scanning: false,
+      syncingOsv: true,
+      onSyncOsv,
+      onScan: () => {},
+    };
+    expect(props.syncingOsv).toBe(true);
+    expect(props.onSyncOsv).toBe(onSyncOsv);
+  });
+
+  it('ScanSourceId type covers all three sources', () => {
+    const sources: ScanSourceId[] = ['pnpm-audit', 'grype', 'cve-lite'];
+    expect(sources).toHaveLength(3);
+  });
+
+  it('onScan accepts both all and specific sources', () => {
+    let called: ScanSourceId[] | 'all' | null = null;
+    const props: SecurityHeaderProps = {
+      findingsCount: 0,
+      sourcesCount: 0,
+      lastScan: undefined,
+      scanning: false,
+      onScan: (sources) => { called = sources; },
+    };
+    props.onScan('all');
+    expect(called).toBe('all');
+
+    props.onScan(['grype']);
+    expect(called).toEqual(['grype']);
+
+    props.onScan(['pnpm-audit', 'cve-lite']);
+    expect(called).toEqual(['pnpm-audit', 'cve-lite']);
   });
 });

@@ -1,13 +1,18 @@
 'use client';
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { SecurityHeader } from '@/components/security/security-header';
+import { SecurityHeader, type ScanSourceId } from '@/components/security/security-header';
 import { SecuritySummaryBar } from '@/components/security/security-summary-bar';
 import { ProjectSecurityAccordion } from '@/components/security/project-security-accordion';
 import type { SourceResult } from '@/lib/security/types';
 import { mapWithConcurrency } from '@/lib/concurrency';
 
 interface ProjectsResponse { projects: Array<{ id: string; name: string }> }
+
+interface FleetScanState {
+  meters: Partial<Record<ScanSourceId, { done: number; total: number; active: number }>>;
+  inflight: boolean;
+}
 
 function SecurityHubInner() {
   const searchParams = useSearchParams();
@@ -18,11 +23,12 @@ function SecurityHubInner() {
   const [allFindingsSeverity, setAllFindingsSeverity] = useState<{
     critical: number; high: number; medium: number; low: number; info: number;
   }>({ critical: 0, high: 0, medium: 0, low: 0, info: 0 });
-  const [refreshing, setRefreshing] = useState(false);
-  const [scanProgress, setScanProgress] = useState<{ done: number; total: number } | null>(null);
+
+  const [fleetScan, setFleetScan] = useState<FleetScanState>({ meters: {}, inflight: false });
+  const [osv, setOsv] = useState<{ lastSync?: string }>({});
+  const [syncingOsv, setSyncingOsv] = useState(false);
 
   const refresh = useCallback(async () => {
-    setRefreshing(true);
     try {
       const [projectsRes, findingsRes] = await Promise.all([
         fetch('/api/projects').then(r => r.json() as Promise<ProjectsResponse>),
@@ -50,36 +56,85 @@ function SecurityHubInner() {
       }
       setPerProjectSources(sourcesMap);
       setAllFindingsSeverity(sev);
-    } finally {
-      setRefreshing(false);
+    } catch {
+      // best-effort — leave previous state intact on network error
     }
   }, []);
 
-  const rescanAll = useCallback(async () => {
+  // Fetch OSV DB status on mount
+  useEffect(() => {
+    fetch('/api/security/cve-lite/db-status')
+      .then(r => r.json())
+      .then((d: { builtAt?: string; lastSync?: string; mtime?: string; timestamp?: string }) =>
+        setOsv({ lastSync: d?.builtAt ?? d?.lastSync ?? d?.mtime ?? d?.timestamp ?? undefined })
+      )
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const onSyncOsv = useCallback(async () => {
+    setSyncingOsv(true);
+    try {
+      const res = await fetch('/api/security/cve-lite/sync', { method: 'POST' });
+      if (res.ok) {
+        const j = await res.json().catch(() => null);
+        setOsv({ lastSync: j?.builtAt ?? j?.lastSync ?? new Date().toISOString() });
+      }
+    } finally {
+      setSyncingOsv(false);
+    }
+  }, []);
+
+  const onScan = useCallback(async (sources: ScanSourceId[] | 'all') => {
     if (projects.length === 0) {
       // No projects loaded yet — fall back to cache-only refresh
       await refresh();
       return;
     }
-    setRefreshing(true);
-    setScanProgress({ done: 0, total: projects.length });
+    const sourceIds: ScanSourceId[] = sources === 'all'
+      ? ['pnpm-audit', 'grype', 'cve-lite']
+      : sources;
+    const query = sources === 'all' ? '' : `?sources=${sourceIds.join(',')}`;
+
+    // Initialize meters
+    const initial: FleetScanState = {
+      inflight: true,
+      meters: Object.fromEntries(sourceIds.map(s => [s, { done: 0, total: projects.length, active: 0 }])),
+    };
+    setFleetScan(initial);
+
     try {
       await mapWithConcurrency(projects, 3, async (p) => {
+        // Mark this project as active for all requested sources
+        setFleetScan(prev => ({
+          ...prev,
+          meters: Object.fromEntries(
+            Object.entries(prev.meters).map(([sid, m]) => [sid, { ...m!, active: (m!.active ?? 0) + 1 }]),
+          ),
+        }));
+        let result: { sources?: Record<string, unknown> } = {};
         try {
-          await fetch(`/api/projects/${p.id}/security-scan`, { method: 'POST' });
-        } catch {
-          // best-effort: count failure as done
-        }
-        setScanProgress(prev => prev ? { done: prev.done + 1, total: prev.total } : null);
+          const res = await fetch(`/api/projects/${p.id}/security-scan${query}`, { method: 'POST' });
+          if (res.ok) result = await res.json();
+        } catch {/* best-effort */}
+        // Tick done for each source returned in the response (or each requested source if response missing)
+        const respondedSources = result.sources ? Object.keys(result.sources) : sourceIds;
+        setFleetScan(prev => ({
+          ...prev,
+          meters: Object.fromEntries(
+            Object.entries(prev.meters).map(([sid, m]) => {
+              const ticked = respondedSources.includes(sid);
+              return [sid, { ...m!, active: Math.max(0, (m!.active ?? 0) - 1), done: m!.done + (ticked ? 1 : 0) }];
+            }),
+          ),
+        }));
       });
-      await refresh();
+      await refresh();  // pull updated findings into the page state
     } finally {
-      setScanProgress(null);
-      setRefreshing(false);
+      setFleetScan({ meters: {}, inflight: false });
     }
   }, [projects, refresh]);
-
-  useEffect(() => { refresh(); }, [refresh]);
 
   const findingsCount = useMemo(
     () => allFindingsSeverity.critical + allFindingsSeverity.high + allFindingsSeverity.medium + allFindingsSeverity.low,
@@ -112,15 +167,18 @@ function SecurityHubInner() {
         findingsCount={findingsCount}
         sourcesCount={sourcesCount}
         lastScan={lastScan}
-        scanning={refreshing}
-        scanProgress={scanProgress}
+        scanning={fleetScan.inflight}
         projectCount={projects.length}
-        onRescan={rescanAll}
+        meters={fleetScan.meters}
+        osv={osv}
+        syncingOsv={syncingOsv}
+        onSyncOsv={onSyncOsv}
+        onScan={onScan}
       />
       <SecuritySummaryBar counts={allFindingsSeverity} />
       <div className="flex-1 overflow-auto p-6 space-y-3">
         {projects.length === 0 ? (
-          <div className="text-sm text-zinc-500">{refreshing ? 'Loading projects…' : 'No projects.'}</div>
+          <div className="text-sm text-zinc-500">{fleetScan.inflight ? 'Scanning…' : 'No projects.'}</div>
         ) : (
           projects.map(p => (
             <ProjectSecurityAccordion
