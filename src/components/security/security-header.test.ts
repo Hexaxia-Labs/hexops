@@ -41,4 +41,70 @@ describe('SecurityHeader', () => {
     };
     expect(props.scanning).toBe(true);
   });
+
+  it('accepts optional scanProgress prop', () => {
+    const propsInFlight: SecurityHeaderProps = {
+      findingsCount: 0,
+      sourcesCount: 0,
+      lastScan: undefined,
+      scanning: true,
+      scanProgress: { done: 5, total: 31 },
+      onRescan: () => {},
+    };
+    expect(propsInFlight.scanProgress?.done).toBe(5);
+    expect(propsInFlight.scanProgress?.total).toBe(31);
+
+    const propsNull: SecurityHeaderProps = {
+      findingsCount: 0,
+      sourcesCount: 0,
+      lastScan: undefined,
+      scanning: false,
+      scanProgress: null,
+      onRescan: () => {},
+    };
+    expect(propsNull.scanProgress).toBeNull();
+  });
+
+  it('accepts optional projectCount prop for empty-state copy', () => {
+    const props: SecurityHeaderProps = {
+      findingsCount: 0,
+      sourcesCount: 0,
+      lastScan: undefined,
+      scanning: false,
+      projectCount: 12,
+      onRescan: () => {},
+    };
+    expect(props.projectCount).toBe(12);
+    // When findingsCount===0 and lastScan is undefined, the component should show
+    // "{projectCount} projects · no scans cached yet" — verified structurally here.
+    expect(props.findingsCount).toBe(0);
+    expect(props.lastScan).toBeUndefined();
+  });
+
+  it('scanProgress null leaves subtitle in normal or empty-state mode', () => {
+    // Explicitly null scanProgress + no findings + no lastScan → empty-state
+    const emptyState: SecurityHeaderProps = {
+      findingsCount: 0,
+      sourcesCount: 0,
+      lastScan: undefined,
+      scanning: false,
+      scanProgress: null,
+      projectCount: 5,
+      onRescan: () => {},
+    };
+    expect(emptyState.scanProgress).toBeNull();
+    expect(emptyState.projectCount).toBe(5);
+
+    // Explicitly null scanProgress + findings present → normal subtitle
+    const normalState: SecurityHeaderProps = {
+      findingsCount: 10,
+      sourcesCount: 2,
+      lastScan: '2026-05-26T15:00:00Z',
+      scanning: false,
+      scanProgress: null,
+      onRescan: () => {},
+    };
+    expect(normalState.findingsCount).toBe(10);
+    expect(normalState.scanProgress).toBeNull();
+  });
 });

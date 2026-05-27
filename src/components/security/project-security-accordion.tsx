@@ -101,6 +101,20 @@ export function ProjectSecurityAccordion({
     }
   }, [project.id, options, onAnyDataChanged]);
 
+  // Scan button handler: run 3-source security scan first (best-effort), then cve-lite scan.
+  // Note: load(true) already calls onAnyDataChanged internally, so we don't call it again here.
+  const scanRow = useCallback(async () => {
+    if (!expanded) setExpanded(true);
+    setLoading(true); setError(null);
+    try {
+      await fetch(`/api/projects/${project.id}/security-scan`, { method: 'POST' });
+    } catch {
+      // best-effort — proceed to cve-lite scan regardless
+    }
+    // load() manages loading state from here; setLoading(true) above covers the 3-source phase
+    await load(true);
+  }, [project.id, expanded, load]);
+
   // Lazy load: fetch when first expanded
   useEffect(() => {
     if (expanded && !loadedOnce) {
@@ -344,10 +358,7 @@ export function ProjectSecurityAccordion({
             variant="ghost"
             size="sm"
             className="h-7 text-xs"
-            onClick={() => {
-              if (!expanded) setExpanded(true);
-              load(true);
-            }}
+            onClick={scanRow}
             disabled={loading}
           >
             <RefreshCw className={cn('h-3 w-3 mr-1', loading && 'animate-spin')} />

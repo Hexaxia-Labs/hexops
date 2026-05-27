@@ -5,6 +5,7 @@ import { SecurityHeader } from '@/components/security/security-header';
 import { SecuritySummaryBar } from '@/components/security/security-summary-bar';
 import { ProjectSecurityAccordion } from '@/components/security/project-security-accordion';
 import type { SourceResult } from '@/lib/security/types';
+import { mapWithConcurrency } from '@/lib/concurrency';
 
 interface ProjectsResponse { projects: Array<{ id: string; name: string }> }
 
@@ -18,6 +19,7 @@ function SecurityHubInner() {
     critical: number; high: number; medium: number; low: number; info: number;
   }>({ critical: 0, high: 0, medium: 0, low: 0, info: 0 });
   const [refreshing, setRefreshing] = useState(false);
+  const [scanProgress, setScanProgress] = useState<{ done: number; total: number } | null>(null);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -53,6 +55,30 @@ function SecurityHubInner() {
     }
   }, []);
 
+  const rescanAll = useCallback(async () => {
+    if (projects.length === 0) {
+      // No projects loaded yet — fall back to cache-only refresh
+      await refresh();
+      return;
+    }
+    setRefreshing(true);
+    setScanProgress({ done: 0, total: projects.length });
+    try {
+      await mapWithConcurrency(projects, 3, async (p) => {
+        try {
+          await fetch(`/api/projects/${p.id}/security-scan`, { method: 'POST' });
+        } catch {
+          // best-effort: count failure as done
+        }
+        setScanProgress(prev => prev ? { done: prev.done + 1, total: prev.total } : null);
+      });
+      await refresh();
+    } finally {
+      setScanProgress(null);
+      setRefreshing(false);
+    }
+  }, [projects, refresh]);
+
   useEffect(() => { refresh(); }, [refresh]);
 
   const findingsCount = useMemo(
@@ -87,7 +113,9 @@ function SecurityHubInner() {
         sourcesCount={sourcesCount}
         lastScan={lastScan}
         scanning={refreshing}
-        onRescan={refresh}
+        scanProgress={scanProgress}
+        projectCount={projects.length}
+        onRescan={rescanAll}
       />
       <SecuritySummaryBar counts={allFindingsSeverity} />
       <div className="flex-1 overflow-auto p-6 space-y-3">
