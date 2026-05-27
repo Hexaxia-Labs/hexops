@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -272,54 +272,113 @@ const CLASSIFICATION_BADGE: Record<string, string> = {
   'deviation':            'border-purple-500/30 text-purple-400 bg-purple-500/10',
 };
 
+// ─── ExceptionRow — click-to-expand with Edit + Revoke ───────────────────────
+
+function ExceptionRow({
+  exception,
+  onRevoke,
+  onEdit,
+  busyRevoke,
+  busyEdit,
+}: {
+  exception: SecurityException;
+  onRevoke: (exc: SecurityException) => void;
+  onEdit: (exc: SecurityException) => void;
+  busyRevoke?: boolean;
+  busyEdit?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const expiresLabel = exception.expiresAt
+    ? `expires ${new Date(exception.expiresAt).toLocaleDateString()}`
+    : 'no expiry';
+  const detailsId = `exc-${exception.id}-details`;
+  return (
+    <div className="rounded border border-amber-700/40 bg-amber-950/10 overflow-hidden">
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        aria-controls={detailsId}
+        onClick={() => setOpen(o => !o)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setOpen(o => !o);
+          }
+        }}
+        className="flex items-center gap-3 px-3 py-2 text-xs cursor-pointer hover:bg-amber-950/30 transition-colors"
+      >
+        {open
+          ? <ChevronDown className="h-3.5 w-3.5 text-amber-400" />
+          : <ChevronRight className="h-3.5 w-3.5 text-amber-400" />
+        }
+        <Badge variant="outline" className="text-[0.65rem] px-1.5 py-0 border-amber-500/40 text-amber-300 bg-amber-500/10">
+          {exception.classification}
+        </Badge>
+        <span className="text-amber-100 font-medium truncate">{exception.parentPackage}</span>
+        <span className="text-amber-400/70 text-[0.7rem] shrink-0">{expiresLabel}</span>
+        <div className="ml-auto flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onEdit(exception); }}
+            disabled={busyEdit}
+            className="px-2 py-0.5 text-[0.7rem] rounded border border-amber-600/40 text-amber-200 hover:bg-amber-500/10 disabled:opacity-50"
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onRevoke(exception); }}
+            disabled={busyRevoke}
+            className="px-2 py-0.5 text-[0.7rem] rounded border border-amber-600/40 text-amber-200 hover:bg-amber-500/10 disabled:opacity-50"
+          >
+            {busyRevoke ? '…' : 'Revoke'}
+          </button>
+        </div>
+      </div>
+      {open && (
+        <div id={detailsId} className="border-t border-amber-700/30 px-3 py-2 text-xs space-y-1 text-amber-100/80 bg-amber-950/30">
+          <div><span className="text-amber-400/70 mr-2">Reason:</span>{exception.reason}</div>
+          {exception.notes && (
+            <div><span className="text-amber-400/70 mr-2">Notes:</span>{exception.notes}</div>
+          )}
+          <div className="text-[0.7rem] text-amber-400/60 pt-1 border-t border-amber-700/20 mt-1.5">
+            Filed by <span className="text-amber-300">{exception.createdBy}</span> at {new Date(exception.createdAt).toLocaleString()}
+            {exception.expiresAt && <> · expires {new Date(exception.expiresAt).toLocaleString()}</>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── ActiveExceptionsSection ──────────────────────────────────────────────────
 
 function ActiveExceptionsSection({
   exceptions,
   onRevoke,
+  onEdit,
 }: {
   exceptions: SecurityException[];
-  onRevoke: (id: string) => void;
+  onRevoke: (exc: SecurityException) => void;
+  onEdit: (exc: SecurityException) => void;
 }) {
-  const [open, setOpen] = useState(false);
   return (
-    <section>
-      <button
-        type="button"
-        onClick={() => setOpen(x => !x)}
-        className="flex items-center gap-2 text-xs uppercase tracking-wide text-zinc-500 hover:text-zinc-300 transition-colors mb-2 px-1"
-      >
-        {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+    <section className="mt-4 rounded-lg border border-amber-700/40 bg-amber-950/20 p-3">
+      <h3 className="flex items-center gap-2 text-sm font-medium text-amber-200 mb-3">
+        <AlertTriangle className="h-4 w-4" />
         Active exceptions ({exceptions.length})
-      </button>
-      {open && (
-        <div className="space-y-1">
-          {exceptions.map(e => (
-            <div
-              key={e.id}
-              className="flex items-center gap-2 bg-zinc-900/40 hover:bg-zinc-900/60 transition-colors px-3 py-2 rounded border border-zinc-800/60 text-xs"
-            >
-              <span className={`shrink-0 px-1.5 py-0.5 rounded border ${CLASSIFICATION_BADGE[e.classification] ?? CLASSIFICATION_BADGE['deviation']}`}>
-                {e.classification}
-              </span>
-              <span className="text-zinc-200 font-medium truncate">{e.parentPackage}</span>
-              <span className="text-zinc-500 truncate max-w-[240px]">{e.reason}</span>
-              {e.expiresAt && (
-                <span className="text-zinc-600 shrink-0">
-                  exp {new Date(e.expiresAt).toLocaleDateString()}
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={() => onRevoke(e.id)}
-                className="ml-auto shrink-0 px-1.5 py-0.5 rounded border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors"
-              >
-                Revoke
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+      </h3>
+      <div className="space-y-2">
+        {exceptions.map(exc => (
+          <ExceptionRow
+            key={exc.id}
+            exception={exc}
+            onRevoke={onRevoke}
+            onEdit={onEdit}
+          />
+        ))}
+      </div>
     </section>
   );
 }
@@ -341,6 +400,8 @@ export function ProjectSecurityAccordion({
   const [exceptions, setExceptions] = useState<SecurityException[]>([]);
   const [filingForGroup, setFilingForGroup] = useState<PackageGroup | null>(null);
   const [filingBusy, setFilingBusy] = useState(false);
+  const [editingException, setEditingException] = useState<SecurityException | null>(null);
+  const [editBusy, setEditBusy] = useState(false);
 
   // Per-project CVE Lite state
   const [report, setReport] = useState<CveLiteOutput | null>(null);
@@ -662,10 +723,10 @@ export function ProjectSecurityAccordion({
     }
   }, [filingForGroup, project.id, fetchExceptions, onAnyDataChanged]);
 
-  const handleRevokeException = useCallback(async (exceptionId: string) => {
+  const handleRevokeException = useCallback(async (exc: SecurityException) => {
     try {
       const res = await fetch(
-        `/api/projects/${project.id}/security/exceptions/${exceptionId}/revoke`,
+        `/api/projects/${project.id}/security/exceptions/${exc.id}/revoke`,
         { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
       );
       if (!res.ok) {
@@ -678,6 +739,42 @@ export function ProjectSecurityAccordion({
       setError(e instanceof Error ? e.message : 'failed to revoke exception');
     }
   }, [project.id, fetchExceptions, onAnyDataChanged]);
+
+  const handleEditException = useCallback((exc: SecurityException) => {
+    setEditingException(exc);
+  }, []);
+
+  const handleEditSubmit = useCallback(async (payload: {
+    classification: string;
+    reason: string;
+    expiresAt?: string;
+    notes?: string;
+  }) => {
+    if (!editingException) return;
+    setEditBusy(true);
+    try {
+      const res = await fetch(
+        `/api/projects/${project.id}/security/exceptions/${editingException.id}`,
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+      );
+      if (res.ok) {
+        await fetchExceptions();
+        onAnyDataChanged?.();
+      } else {
+        const e = await res.json().catch(() => ({}));
+        throw new Error((e as { error?: string }).error ?? `HTTP ${res.status}`);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'failed to update exception');
+    } finally {
+      setEditBusy(false);
+      setEditingException(null);
+    }
+  }, [editingException, project.id, fetchExceptions, onAnyDataChanged]);
 
   // Derived view
   const visibleReport: CveLiteOutput | null = report && importedOnly
@@ -770,6 +867,11 @@ export function ProjectSecurityAccordion({
               ✓ Clean
             </Badge>
           ) : null}
+          {activeExceptions.length > 0 && (
+            <Badge variant="outline" className="text-xs border-amber-500/40 text-amber-300 bg-amber-500/10">
+              {activeExceptions.length} exception{activeExceptions.length !== 1 ? 's' : ''}
+            </Badge>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -824,6 +926,7 @@ export function ProjectSecurityAccordion({
             <ActiveExceptionsSection
               exceptions={activeExceptions}
               onRevoke={handleRevokeException}
+              onEdit={handleEditException}
             />
           )}
           <SourcePluginCards
@@ -900,6 +1003,20 @@ export function ProjectSecurityAccordion({
           busy={filingBusy}
           onSubmit={handleFileException}
           onCancel={() => setFilingForGroup(null)}
+        />
+      )}
+      {editingException && (
+        <ExceptionDialog
+          parentPackage={editingException.parentPackage}
+          existing={{
+            classification: editingException.classification,
+            reason: editingException.reason,
+            notes: editingException.notes,
+            expiresAt: editingException.expiresAt,
+          }}
+          onSubmit={handleEditSubmit}
+          onCancel={() => setEditingException(null)}
+          busy={editBusy}
         />
       )}
     </div>

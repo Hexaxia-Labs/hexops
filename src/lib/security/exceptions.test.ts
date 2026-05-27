@@ -7,6 +7,7 @@ import {
   listExceptions,
   listActiveExceptions,
   revokeException,
+  updateException,
   isExceptionActive,
   activeExceptionParentSet,
   _setExceptionsDirForTest,
@@ -132,6 +133,56 @@ describe('listActiveExceptions', () => {
   it('includes non-expired, non-revoked exceptions', () => {
     createException(baseArgs);
     expect(listActiveExceptions(TEST_PROJECT)).toHaveLength(1);
+  });
+});
+
+describe('updateException', () => {
+  it('updates classification and reason', () => {
+    const exc = createException(baseArgs);
+    const updated = updateException({
+      projectId: TEST_PROJECT,
+      exceptionId: exc.id,
+      updates: { classification: 'false-positive', reason: 'scanner is wrong' },
+    });
+    expect(updated?.classification).toBe('false-positive');
+    expect(updated?.reason).toBe('scanner is wrong');
+    // persisted
+    const persisted = listExceptions(TEST_PROJECT)[0];
+    expect(persisted.classification).toBe('false-positive');
+    expect(persisted.reason).toBe('scanner is wrong');
+  });
+
+  it('does not update a revoked exception', () => {
+    const exc = createException(baseArgs);
+    revokeException({ projectId: TEST_PROJECT, exceptionId: exc.id });
+    const result = updateException({
+      projectId: TEST_PROJECT,
+      exceptionId: exc.id,
+      updates: { reason: 'should not apply' },
+    });
+    // returns the revoked exception unchanged
+    expect(result?.revokedAt).toBeTruthy();
+    expect(result?.reason).toBe(baseArgs.reason);
+  });
+
+  it('returns undefined for unknown exception id', () => {
+    const result = updateException({
+      projectId: TEST_PROJECT,
+      exceptionId: 'exc_doesnotexist',
+      updates: { reason: 'no-op' },
+    });
+    expect(result).toBeUndefined();
+  });
+
+  it('clears notes when notes is explicitly set to undefined', () => {
+    const exc = createException({ ...baseArgs, notes: 'some notes' });
+    updateException({
+      projectId: TEST_PROJECT,
+      exceptionId: exc.id,
+      updates: { notes: undefined },
+    });
+    const persisted = listExceptions(TEST_PROJECT)[0];
+    expect(persisted.notes).toBeUndefined();
   });
 });
 

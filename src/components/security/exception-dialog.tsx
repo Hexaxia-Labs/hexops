@@ -14,7 +14,13 @@ const CLASSIFICATIONS: Array<{ value: string; label: string; description: string
 
 export interface ExceptionDialogProps {
   parentPackage: string;
-  findingsCount: number;
+  findingsCount?: number;            // only shown in file mode (omit in edit)
+  existing?: {
+    classification: string;
+    reason: string;
+    notes?: string;
+    expiresAt?: string;
+  };                                  // when present, dialog is in edit mode
   onSubmit(payload: { classification: string; reason: string; expiresAt?: string; notes?: string }): Promise<void>;
   onCancel(): void;
   busy?: boolean;
@@ -23,14 +29,19 @@ export interface ExceptionDialogProps {
 export function ExceptionDialog({
   parentPackage,
   findingsCount,
+  existing,
   onSubmit,
   onCancel,
   busy,
 }: ExceptionDialogProps) {
-  const [classification, setClassification] = useState('risk-accepted');
-  const [reason, setReason] = useState('');
-  const [notes, setNotes] = useState('');
-  const [expiresInDays, setExpiresInDays] = useState<string>('90');
+  const [classification, setClassification] = useState(existing?.classification ?? 'risk-accepted');
+  const [reason, setReason] = useState(existing?.reason ?? '');
+  const [notes, setNotes] = useState(existing?.notes ?? '');
+  const [expiresInDays, setExpiresInDays] = useState<string>(() => {
+    if (!existing?.expiresAt) return existing ? '0' : '90';
+    const ms = new Date(existing.expiresAt).getTime() - Date.now();
+    return Math.max(0, Math.round(ms / 86400000)).toString();
+  });
 
   const handleSubmit = async () => {
     if (!reason.trim()) return;
@@ -49,6 +60,10 @@ export function ExceptionDialog({
     });
   };
 
+  const title = existing
+    ? `Edit exception for ${parentPackage}`
+    : `File exception for ${parentPackage}`;
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
@@ -57,10 +72,12 @@ export function ExceptionDialog({
     >
       <div className="w-full max-w-lg rounded-lg border border-zinc-800 bg-zinc-950 shadow-xl">
         <div className="border-b border-zinc-800 px-5 py-3">
-          <h2 className="text-sm font-medium text-zinc-100">File exception for {parentPackage}</h2>
-          <p className="text-xs text-zinc-500 mt-1">
-            {findingsCount} finding{findingsCount !== 1 ? 's' : ''} covered
-          </p>
+          <h2 className="text-sm font-medium text-zinc-100">{title}</h2>
+          {!existing && findingsCount !== undefined && (
+            <p className="text-xs text-zinc-500 mt-1">
+              {findingsCount} finding{findingsCount !== 1 ? 's' : ''} covered
+            </p>
+          )}
         </div>
         <div className="px-5 py-4 space-y-3">
           <label className="block">
@@ -119,7 +136,7 @@ export function ExceptionDialog({
             onClick={handleSubmit}
             disabled={busy || !reason.trim()}
           >
-            {busy ? 'Filing…' : 'File exception'}
+            {existing ? (busy ? 'Saving…' : 'Save changes') : (busy ? 'Filing…' : 'File exception')}
           </Button>
         </div>
       </div>

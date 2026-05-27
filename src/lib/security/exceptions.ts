@@ -121,6 +121,24 @@ export function revokeException(args: {
   return exc;
 }
 
+export function updateException(args: {
+  projectId: string;
+  exceptionId: string;
+  updates: Partial<Pick<SecurityException, 'classification' | 'reason' | 'notes' | 'expiresAt'>>;
+  updatedBy?: string;
+}): SecurityException | undefined {
+  const file = readFile(args.projectId);
+  const exc = file.exceptions.find((e) => e.id === args.exceptionId);
+  if (!exc || exc.revokedAt) return exc;
+  // Apply only the fields explicitly present in updates (preserve omitted)
+  if (args.updates.classification !== undefined) exc.classification = args.updates.classification;
+  if (args.updates.reason !== undefined) exc.reason = args.updates.reason;
+  if ('notes' in args.updates) exc.notes = args.updates.notes;        // allow clearing to undefined
+  if ('expiresAt' in args.updates) exc.expiresAt = args.updates.expiresAt;
+  writeFile(args.projectId, file);
+  return exc;
+}
+
 /**
  * Returns the set of parentPackage values that have an active exception.
  * Findings whose parent matches one of these are filtered from aggregate
