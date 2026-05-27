@@ -9,6 +9,7 @@ import type { CveLiteOutput, ScanOptions } from '@/lib/security/sources/cve-lite
 import type { DbStatus } from '@/lib/security/cve-lite-db';
 import type { FindingRow } from '@/lib/security/cve-lite-view';
 import type { SourceResult, Finding } from '@/lib/security/types';
+import { deriveParentPackage } from '@/lib/security/parent-package';
 import { selectFixPlan, findingRows, deriveReachable } from '@/lib/security/cve-lite-view';
 import { FixPlan } from '@/components/security/cve-lite/fix-plan';
 import { CveLiteFindings } from '@/components/security/cve-lite/cve-lite-findings';
@@ -67,22 +68,34 @@ interface PackageGroup {
   severityCounts: { critical: number; high: number; medium: number; low: number; info: number };
   fixedIn?: string;
   sourcesUnion: string[];
+  /** Present when all findings in this group share the same parent npm package. */
+  parentPackage?: string;
+  /** The originally-reported package (e.g. 'stdlib') when grouped by parent. */
+  reportedPackage?: string;
 }
 
-function groupFindingsByPackage(findings: Finding[]): PackageGroup[] {
+function groupFindingsForDisplay(findings: Finding[]): PackageGroup[] {
   const map = new Map<string, PackageGroup>();
   for (const f of findings) {
     const pkg = f.package ?? f.title;
     const ver = f.version;
-    const key = `${pkg}@${ver ?? '?'}`;
+    const parent = deriveParentPackage(f);
+    // Group by parent when derivable AND different from the reported package
+    const useParent = parent && parent !== pkg;
+    const key = useParent ? `parent:${parent}` : `${pkg}@${ver ?? '?'}`;
     let g = map.get(key);
     if (!g) {
       g = {
-        key, package: pkg, version: ver, findings: [],
+        key,
+        package: useParent ? parent! : pkg,
+        version: useParent ? undefined : ver,
+        findings: [],
         worstSeverity: 'info',
         severityCounts: { critical: 0, high: 0, medium: 0, low: 0, info: 0 },
         fixedIn: undefined,
         sourcesUnion: [],
+        parentPackage: useParent ? parent! : undefined,
+        reportedPackage: useParent ? pkg : undefined,
       };
       map.set(key, g);
     }
@@ -172,8 +185,17 @@ function PackageRow({ group }: { group: PackageGroup }) {
         <span className={`shrink-0 px-1.5 py-0.5 rounded border ${SEVERITY_BADGE[group.worstSeverity] ?? SEVERITY_BADGE.info}`}>
           {group.worstSeverity}
         </span>
-        <span className="text-zinc-200 font-medium truncate">{group.package}</span>
-        {group.version && <span className="text-zinc-500 shrink-0">{group.version}</span>}
+        {group.parentPackage ? (
+          <>
+            <span className="text-zinc-200 font-medium truncate">{group.parentPackage}</span>
+            <span className="text-zinc-500 shrink-0 text-[0.7rem]">via {group.reportedPackage}</span>
+          </>
+        ) : (
+          <>
+            <span className="text-zinc-200 font-medium truncate">{group.package}</span>
+            {group.version && <span className="text-zinc-500 shrink-0">{group.version}</span>}
+          </>
+        )}
         <div className="flex items-center gap-1 ml-2">
           {group.severityCounts.critical > 0 && (
             <span className="px-1.5 py-0.5 rounded border border-red-500/30 text-red-400 bg-red-500/10">
@@ -513,7 +535,7 @@ export function ProjectSecurityAccordion({
 
   // Memoised package groups for "All findings" section
   const packageGroups = useMemo(
-    () => (findings && findings.length > 0 ? groupFindingsByPackage(findings) : []),
+    () => (findings && findings.length > 0 ? groupFindingsForDisplay(findings) : []),
     [findings],
   );
 
