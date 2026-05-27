@@ -4,7 +4,7 @@ import { useSearchParams } from 'next/navigation';
 import { SecurityHeader, type ScanSourceId } from '@/components/security/security-header';
 import { SecuritySummaryBar } from '@/components/security/security-summary-bar';
 import { ProjectSecurityAccordion } from '@/components/security/project-security-accordion';
-import type { SourceResult } from '@/lib/security/types';
+import type { SourceResult, Finding } from '@/lib/security/types';
 import { mapWithConcurrency } from '@/lib/concurrency';
 
 interface ProjectsResponse { projects: Array<{ id: string; name: string }> }
@@ -24,6 +24,7 @@ function SecurityHubInner() {
   const [projects, setProjects] = useState<Array<{ id: string; name: string }>>([]);
   const [perProjectSources, setPerProjectSources] = useState<Record<string, Record<string, SourceResult>>>({});
   const [perProjectSeverity, setPerProjectSeverity] = useState<Record<string, SeverityCounts>>({});
+  const [perProjectFindings, setPerProjectFindings] = useState<Record<string, Finding[]>>({});
   const [allFindingsSeverity, setAllFindingsSeverity] = useState<{
     critical: number; high: number; medium: number; low: number; info: number;
   }>({ critical: 0, high: 0, medium: 0, low: 0, info: 0 });
@@ -47,9 +48,11 @@ function SecurityHubInner() {
       // Per-project source map for the accordion headers, and per-project severity counts
       const sourcesMap: Record<string, Record<string, SourceResult>> = {};
       const perProj: Record<string, SeverityCounts> = {};
+      const findingsMap: Record<string, Finding[]> = {};
       const sev = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
       for (const p of (findingsRes as { projects?: Array<{ projectId: string; sources?: Record<string, SourceResult>; findings?: Array<{ severity?: string }> }> }).projects ?? []) {
         sourcesMap[p.projectId] = p.sources ?? {};
+        findingsMap[p.projectId] = (p.findings ?? []) as Finding[];
         const c: SeverityCounts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
         for (const f of p.findings ?? []) {
           const s = (f.severity ?? '').toLowerCase();
@@ -63,6 +66,7 @@ function SecurityHubInner() {
       }
       setPerProjectSources(sourcesMap);
       setPerProjectSeverity(perProj);
+      setPerProjectFindings(findingsMap);
       setAllFindingsSeverity(sev);
     } catch {
       // best-effort — leave previous state intact on network error
@@ -194,6 +198,7 @@ function SecurityHubInner() {
               project={p}
               sources={perProjectSources[p.id] ?? {}}
               severity={perProjectSeverity[p.id]}
+              findings={perProjectFindings[p.id] ?? []}
               startsExpanded={p.id === initialProject}
               onAnyDataChanged={refresh}
             />

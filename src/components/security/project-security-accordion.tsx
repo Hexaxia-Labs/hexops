@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
 import type { CveLiteOutput, ScanOptions } from '@/lib/security/sources/cve-lite';
 import type { DbStatus } from '@/lib/security/cve-lite-db';
 import type { FindingRow } from '@/lib/security/cve-lite-view';
-import type { SourceResult } from '@/lib/security/types';
+import type { SourceResult, Finding } from '@/lib/security/types';
 import { selectFixPlan, findingRows, deriveReachable } from '@/lib/security/cve-lite-view';
 import { FixPlan } from '@/components/security/cve-lite/fix-plan';
 import { CveLiteFindings } from '@/components/security/cve-lite/cve-lite-findings';
@@ -38,14 +38,49 @@ export interface ProjectSecurityAccordionProps {
   project: { id: string; name: string };
   sources: Record<string, SourceResult>;
   severity?: { critical: number; high: number; medium: number; low: number; info?: number };
+  findings?: Finding[];
   startsExpanded?: boolean;
   onAnyDataChanged?: () => void;
+}
+
+const SEVERITY_BADGE: Record<string, string> = {
+  critical: 'border-red-500/30 text-red-400 bg-red-500/10',
+  high: 'border-orange-500/30 text-orange-400 bg-orange-500/10',
+  medium: 'border-yellow-500/30 text-yellow-400 bg-yellow-500/10',
+  low: 'border-zinc-500/30 text-zinc-400 bg-zinc-500/10',
+  info: 'border-zinc-700 text-zinc-500 bg-zinc-900/40',
+};
+
+function FindingRow({ finding: f }: { finding: Finding }) {
+  const sev = (f.severity ?? 'info').toLowerCase();
+  return (
+    <div className="flex items-center gap-2 bg-zinc-900/40 hover:bg-zinc-900/60 transition-colors px-3 py-2 rounded border border-zinc-800/60 text-xs">
+      <span className={`shrink-0 px-1.5 py-0.5 rounded border ${SEVERITY_BADGE[sev] ?? SEVERITY_BADGE.info}`}>{sev}</span>
+      <span className="text-zinc-200 font-medium truncate">{f.package ?? f.title}</span>
+      {f.version && <span className="text-zinc-500 shrink-0">{f.version}</span>}
+      {f.divergent && (
+        <span className="shrink-0 px-1.5 py-0.5 rounded border border-amber-500/30 text-amber-400 bg-amber-500/10">
+          divergent
+        </span>
+      )}
+      <div className="ml-auto flex items-center gap-2 text-zinc-500 shrink-0">
+        {f.advisoryIds.length > 0 && (
+          <span className="truncate max-w-[280px]" title={f.advisoryIds.join(', ')}>
+            {f.advisoryIds[0]}{f.advisoryIds.length > 1 ? ` +${f.advisoryIds.length - 1}` : ''}
+          </span>
+        )}
+        <span className="opacity-75">{f.sources.join(' + ')}</span>
+        {f.fixedIn && <span className="text-zinc-400">fix: {f.fixedIn}</span>}
+      </div>
+    </div>
+  );
 }
 
 export function ProjectSecurityAccordion({
   project,
   sources,
   severity,
+  findings,
   startsExpanded = false,
   onAnyDataChanged,
 }: ProjectSecurityAccordionProps) {
@@ -395,6 +430,23 @@ export function ProjectSecurityAccordion({
       {/* Body — only when expanded */}
       {expanded && (
         <div className="border-t border-zinc-800 bg-zinc-950/30 px-4 py-3 space-y-3">
+          {findings && findings.length > 0 && (
+            <section>
+              <h3 className="text-xs uppercase tracking-wide text-zinc-500 mb-2 px-1">
+                All findings ({findings.length})
+              </h3>
+              <div className="space-y-1">
+                {findings.slice(0, 50).map((f) => (
+                  <FindingRow key={f.dedupKey} finding={f} />
+                ))}
+                {findings.length > 50 && (
+                  <div className="text-xs text-zinc-500 px-2 py-1">
+                    + {findings.length - 50} more (refine with filters / scan controls below)
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
           <SourcePluginCards
             sources={sources}
             plugins={pluginEntries}
