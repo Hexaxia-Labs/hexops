@@ -29,6 +29,7 @@ import { ExceptionDialog } from '@/components/security/exception-dialog';
 import type { FindingState } from '@/lib/security/finding-states';
 import { RemediationPanel } from '@/components/security/remediation-panel';
 import { RemediationDialog } from '@/components/security/remediation-dialog';
+import type { RemediationDialogPhase } from '@/components/security/remediation-dialog';
 
 interface ConfirmState { title: string; body: ReactNode; run: () => Promise<void> }
 interface GitStatus { branch: string; ahead: number; behind: number; dirty: boolean }
@@ -485,6 +486,12 @@ export function ProjectSecurityAccordion({
     mode: 'apply' | 'override';
   } | null>(null);
   const [remediationBusy, setRemediationBusy] = useState(false);
+  const [remediationPhase, setRemediationPhase] = useState<RemediationDialogPhase>('configuring');
+  const [remediationOutcome, setRemediationOutcome] = useState<{
+    previousCount: number;
+    currentCount: number;
+    error?: string;
+  } | undefined>(undefined);
   const [referencesFor, setReferencesFor] = useState<PackageGroup | null>(null);
 
   // "All findings" section collapse state — open by default when ≤10 findings
@@ -607,6 +614,14 @@ export function ProjectSecurityAccordion({
       setGitStatus(null);
     }
   }, [expanded]);
+
+  // Reset remediation phase/outcome whenever a dialog is opened fresh
+  useEffect(() => {
+    if (remediation) {
+      setRemediationPhase('configuring');
+      setRemediationOutcome(undefined);
+    }
+  }, [remediation]);
 
   const fetchGitStatus = useCallback(async (): Promise<GitStatus | null> => {
     try {
@@ -853,10 +868,16 @@ export function ProjectSecurityAccordion({
     const fromVersion = group.version ?? '';
     const advisories = Array.from(new Set(group.findings.flatMap(f => f.advisoryIds)));
     const severity = group.worstSeverity;
+    const previousCount = group.findings.length;
+    const groupKey = group.key;
 
     setRemediationBusy(true);
+    setRemediationOutcome(undefined);
+
     try {
-      const res = await fetch(`/api/projects/${project.id}/update`, {
+      // Phase: installing
+      setRemediationPhase('installing');
+      const installRes = await fetch(`/api/projects/${project.id}/update`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -873,11 +894,42 @@ export function ProjectSecurityAccordion({
           },
         }),
       });
-      if (!res.ok) {
-        const e = await res.json().catch(() => ({}));
-        throw new Error((e as { error?: string }).error ?? `update failed (HTTP ${res.status})`);
+      if (!installRes.ok) {
+        const e = await installRes.json().catch(() => ({}));
+        throw new Error((e as { error?: string }).error ?? `update failed (HTTP ${installRes.status})`);
       }
-      setRemediation(null);
+
+      // Phase: rescanning — full 3-source scan to refresh the merged cache
+      setRemediationPhase('rescanning');
+      await fetch(`/api/projects/${project.id}/security-scan`, { method: 'POST' });
+      // Continue to verify even if rescan fails (best-effort)
+
+      // Phase: verifying — re-pull merged findings and compare for this group
+      setRemediationPhase('verifying');
+      const findingsRes = await fetch('/api/security/findings');
+      const findingsJson = await findingsRes.json().catch(() => ({}));
+      const projEntry = (findingsJson.projects ?? []).find(
+        (p: { projectId: string }) => p.projectId === project.id,
+      );
+      const allFindings: Finding[] = projEntry?.findings ?? [];
+
+      // Count remaining findings for this group: same parent-package key OR same reported package@version
+      const stillMatching = allFindings.filter((f) => {
+        if (groupKey.startsWith('parent:')) {
+          const expectedParent = groupKey.slice(7);
+          return deriveParentPackage(f) === expectedParent;
+        }
+        // Fallback: package@version equality
+        return `${f.package ?? ''}@${f.version ?? '?'}` === groupKey;
+      });
+      const currentCount = stillMatching.length;
+
+      setRemediationOutcome({ previousCount, currentCount });
+      if (currentCount === 0) setRemediationPhase('resolved');
+      else if (currentCount < previousCount) setRemediationPhase('partial');
+      else setRemediationPhase('unresolved');
+
+      // Open the pending-commit banner so the user can review + commit the change
       const rc = {
         packages: [{
           name: targetPkg,
@@ -892,7 +944,9 @@ export function ProjectSecurityAccordion({
       await beginPendingCommit(rc);
       onAnyDataChanged?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'remediation failed');
+      const msg = err instanceof Error ? err.message : 'remediation failed';
+      setRemediationOutcome({ previousCount, currentCount: previousCount, error: msg });
+      setRemediationPhase('error');
     } finally {
       setRemediationBusy(false);
     }
@@ -1161,6 +1215,21 @@ export function ProjectSecurityAccordion({
               ? `Note: grype's fix versions describe the embedded artifact (${remediation.group.reportedPackage}). Bumping ${remediation.group.parentPackage} is the npm-level action; consult the package's release notes to find a release that resolves the underlying issue.`
               : undefined
           }
+          phase={remediationPhase}
+          outcome={remediationOutcome}
+          onFileException={() => {
+            // Close remediation dialog, open file-exception dialog targeting the same group
+            const groupToFile = remediation.group;
+            setRemediation(null);
+            setRemediationPhase('configuring');
+            setRemediationOutcome(undefined);
+            setFilingForGroup(groupToFile);
+          }}
+          onClose={() => {
+            setRemediation(null);
+            setRemediationPhase('configuring');
+            setRemediationOutcome(undefined);
+          }}
           onSubmit={handleRemediationSubmit}
           onCancel={() => setRemediation(null)}
           busy={remediationBusy}

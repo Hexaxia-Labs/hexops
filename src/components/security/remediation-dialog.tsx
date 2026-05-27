@@ -3,6 +3,16 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 
+export type RemediationDialogPhase =
+  | 'configuring'   // user is editing inputs (current default)
+  | 'installing'    // /update POST in flight
+  | 'rescanning'    // /security-scan POST in flight
+  | 'verifying'     // re-fetching /api/security/findings + comparing
+  | 'resolved'      // outcome: all this group's findings cleared
+  | 'partial'       // outcome: some findings cleared, some remain
+  | 'unresolved'    // outcome: no findings cleared (upstream may not have a fix)
+  | 'error';        // anything threw; show the error
+
 export interface RemediationDialogProps {
   /** Display name of the package the user is about to bump. */
   targetPackage: string;
@@ -19,9 +29,73 @@ export interface RemediationDialogProps {
   mode: 'apply' | 'override';
   /** Optional context shown as a small note (e.g. parent-embedded warning). */
   note?: string;
+
+  // State-machine surface:
+  phase?: RemediationDialogPhase;          // defaults to 'configuring'
+  outcome?: {
+    previousCount: number;
+    currentCount: number;
+    error?: string;
+    installLogTail?: string;               // optional last-N-lines of install output (only if available)
+  };
+  // Outcome action:
+  onFileException?: () => void;            // wired by accordion to setFilingForGroup
+  onClose: () => void;                     // explicit close (replaces onCancel for outcome phases)
+
   onSubmit(payload: { targetVersion: string; viaOverride: boolean }): Promise<void>;
   onCancel(): void;
-  busy?: boolean;
+  busy?: boolean;                          // soft-deprecated by phase — keep for back-compat / configuring spinner
+}
+
+// ─── Phase progress indicator ─────────────────────────────────────────────────
+
+const PIPELINE_PHASES: Array<{ id: RemediationDialogPhase; label: string }> = [
+  { id: 'installing', label: 'Installing pnpm package' },
+  { id: 'rescanning', label: 'Rescanning' },
+  { id: 'verifying',  label: 'Verifying remediation' },
+];
+
+const PHASE_ORDER: Record<RemediationDialogPhase, number> = {
+  configuring: 0,
+  installing:  1,
+  rescanning:  2,
+  verifying:   3,
+  resolved:    4,
+  partial:     4,
+  unresolved:  4,
+  error:       4,
+};
+
+function PhaseProgress({ phase }: { phase: RemediationDialogPhase }) {
+  const current = PHASE_ORDER[phase];
+  return (
+    <div className="space-y-2 py-2">
+      <div className="text-xs text-zinc-400 mb-3">Configured</div>
+      {PIPELINE_PHASES.map((p) => {
+        const order = PHASE_ORDER[p.id];
+        const isDone    = current > order;
+        const isActive  = current === order;
+        const isPending = current < order;
+        return (
+          <div key={p.id} className={`flex items-center gap-2 text-sm ${isPending ? 'text-zinc-600' : isActive ? 'text-zinc-100' : 'text-zinc-400'}`}>
+            {isDone && (
+              <span className="text-green-400 shrink-0">&#10003;</span>
+            )}
+            {isActive && (
+              <span className="shrink-0 inline-block w-4 text-center animate-spin text-cyan-400">&#8987;</span>
+            )}
+            {isPending && (
+              <span className="shrink-0 inline-block w-4 text-center text-zinc-700">&bull;</span>
+            )}
+            <span>{p.label}{isActive ? '…' : ''}</span>
+          </div>
+        );
+      })}
+      <p className="text-xs text-zinc-600 pt-2 border-t border-zinc-800 mt-3">
+        Install is server-side. Close this tab and return — it will complete in the background.
+      </p>
+    </div>
+  );
 }
 
 export function RemediationDialog({
@@ -31,6 +105,10 @@ export function RemediationDialog({
   cveCount,
   mode,
   note,
+  phase = 'configuring',
+  outcome,
+  onFileException,
+  onClose,
   onSubmit,
   onCancel,
   busy,
@@ -44,6 +122,207 @@ export function RemediationDialog({
   };
 
   const title = mode === 'override' ? `Override pin ${targetPackage}` : `Apply fix to ${targetPackage}`;
+
+  const isProgressPhase = phase === 'installing' || phase === 'rescanning' || phase === 'verifying';
+  const isOutcomePhase  = phase === 'resolved' || phase === 'partial' || phase === 'unresolved' || phase === 'error';
+
+  // ─── Helpers ───────────────────────────────────────────────────────────────
+
+  function renderInstallLogTail() {
+    if (!outcome?.installLogTail) return null;
+    return (
+      <pre className="mt-3 text-[0.7rem] font-mono text-zinc-400 bg-zinc-900 border border-zinc-800 rounded px-2 py-2 max-h-32 overflow-auto whitespace-pre-wrap">
+        {outcome.installLogTail}
+      </pre>
+    );
+  }
+
+  // ─── Outcome: resolved ──────────────────────────────────────────────────────
+
+  if (phase === 'resolved' && outcome) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true">
+        <div className="w-full max-w-lg rounded-lg border border-zinc-800 bg-zinc-950 shadow-xl">
+          <div className="border-b border-zinc-800 px-5 py-3">
+            <h2 className="text-sm font-medium text-zinc-100">{title}</h2>
+            <p className="text-xs text-zinc-500 mt-1">
+              {cveCount} CVE{cveCount !== 1 ? 's' : ''}
+              {currentVersion ? ` · current ${currentVersion}` : ''}
+            </p>
+          </div>
+          <div className="px-5 py-6 text-center space-y-2">
+            <div className="text-4xl text-green-400">&#10003;</div>
+            <h3 className="text-base font-semibold text-green-300">
+              Fix resolved {outcome.previousCount} finding{outcome.previousCount !== 1 ? 's' : ''} for {targetPackage}
+            </h3>
+            <p className="text-xs text-zinc-400">Zero findings remain for this package group.</p>
+            {renderInstallLogTail()}
+          </div>
+          <div className="flex justify-end gap-2 border-t border-zinc-800 px-5 py-3">
+            <Button variant="outline" size="sm" className="border-green-700/40 text-green-300 hover:bg-green-500/10" onClick={onClose}>
+              Close
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Outcome: partial ───────────────────────────────────────────────────────
+
+  if (phase === 'partial' && outcome) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true">
+        <div className="w-full max-w-lg rounded-lg border border-zinc-800 bg-zinc-950 shadow-xl">
+          <div className="border-b border-zinc-800 px-5 py-3">
+            <h2 className="text-sm font-medium text-zinc-100">{title}</h2>
+            <p className="text-xs text-zinc-500 mt-1">
+              {cveCount} CVE{cveCount !== 1 ? 's' : ''}
+              {currentVersion ? ` · current ${currentVersion}` : ''}
+            </p>
+          </div>
+          <div className="px-5 py-6 text-center space-y-2">
+            <div className="text-4xl text-amber-400">&#9888;</div>
+            <h3 className="text-base font-semibold text-amber-300">
+              Partial fix &mdash; {outcome.currentCount} of {outcome.previousCount} findings remain
+            </h3>
+            <p className="text-xs text-zinc-400">
+              Some findings were resolved, but {outcome.currentCount} remain. These may require further
+              upstream releases or a compensating control.
+            </p>
+            {renderInstallLogTail()}
+          </div>
+          <div className="flex justify-end gap-2 border-t border-zinc-800 px-5 py-3">
+            {onFileException && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-amber-700/40 text-amber-300 hover:bg-amber-500/10"
+                onClick={onFileException}
+              >
+                File exception for remaining
+              </Button>
+            )}
+            <Button variant="outline" size="sm" className="border-zinc-700 text-zinc-300" onClick={onClose}>
+              Close
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Outcome: unresolved ────────────────────────────────────────────────────
+
+  if (phase === 'unresolved' && outcome) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true">
+        <div className="w-full max-w-lg rounded-lg border border-zinc-800 bg-zinc-950 shadow-xl">
+          <div className="border-b border-zinc-800 px-5 py-3">
+            <h2 className="text-sm font-medium text-zinc-100">{title}</h2>
+            <p className="text-xs text-zinc-500 mt-1">
+              {cveCount} CVE{cveCount !== 1 ? 's' : ''}
+              {currentVersion ? ` · current ${currentVersion}` : ''}
+            </p>
+          </div>
+          <div className="px-5 py-5 space-y-3">
+            <div className="flex items-center gap-3">
+              <span className="text-3xl text-amber-400 shrink-0">&#9888;</span>
+              <h3 className="text-sm font-semibold text-amber-300">Fix applied but findings persist</h3>
+            </div>
+            <p className="text-xs text-zinc-300 leading-relaxed">
+              The <span className="font-mono text-zinc-200">{targetPackage}</span> version was updated
+              successfully, but {outcome.previousCount} finding{outcome.previousCount !== 1 ? 's' : ''} remain.
+              The upstream maintainer may not have shipped a release that resolves these advisories yet.
+            </p>
+            <ul className="text-xs text-zinc-400 space-y-1 pl-4 list-disc">
+              <li>File an exception (e.g. risk-accepted or deferred) so the audit trail captures this decision</li>
+              <li>Wait for an upstream release</li>
+              <li>Apply a compensating control and document it</li>
+            </ul>
+            {renderInstallLogTail()}
+          </div>
+          <div className="flex justify-end gap-2 border-t border-zinc-800 px-5 py-3">
+            {onFileException && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-amber-700/40 text-amber-300 hover:bg-amber-500/10"
+                onClick={onFileException}
+              >
+                File exception
+              </Button>
+            )}
+            <Button variant="outline" size="sm" className="border-zinc-700 text-zinc-300" onClick={onClose}>
+              Close
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Outcome: error ─────────────────────────────────────────────────────────
+
+  if (phase === 'error') {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true">
+        <div className="w-full max-w-lg rounded-lg border border-zinc-800 bg-zinc-950 shadow-xl">
+          <div className="border-b border-zinc-800 px-5 py-3">
+            <h2 className="text-sm font-medium text-zinc-100">{title}</h2>
+            <p className="text-xs text-zinc-500 mt-1">
+              {cveCount} CVE{cveCount !== 1 ? 's' : ''}
+              {currentVersion ? ` · current ${currentVersion}` : ''}
+            </p>
+          </div>
+          <div className="px-5 py-6 space-y-3">
+            <div className="flex items-center gap-3">
+              <span className="text-3xl text-red-400 shrink-0">&#8855;</span>
+              <h3 className="text-sm font-semibold text-red-300">Remediation failed</h3>
+            </div>
+            {outcome?.error && (
+              <div className="text-xs text-red-300 bg-red-950/20 border border-red-700/30 rounded px-2 py-1.5 font-mono break-all">
+                {outcome.error}
+              </div>
+            )}
+            {renderInstallLogTail()}
+          </div>
+          <div className="flex justify-end gap-2 border-t border-zinc-800 px-5 py-3">
+            <Button variant="outline" size="sm" className="border-zinc-700 text-zinc-300" onClick={onClose}>
+              Close
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── In-progress phases ─────────────────────────────────────────────────────
+
+  if (isProgressPhase) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true">
+        <div className="w-full max-w-lg rounded-lg border border-zinc-800 bg-zinc-950 shadow-xl">
+          <div className="border-b border-zinc-800 px-5 py-3">
+            <h2 className="text-sm font-medium text-zinc-100">{title}</h2>
+            <p className="text-xs text-zinc-500 mt-1">
+              {cveCount} CVE{cveCount !== 1 ? 's' : ''}
+              {currentVersion ? ` · current ${currentVersion}` : ''}
+            </p>
+          </div>
+          <div className="px-5 py-4">
+            <PhaseProgress phase={phase} />
+          </div>
+          <div className="flex justify-end gap-2 border-t border-zinc-800 px-5 py-3">
+            <span className="text-xs text-zinc-600 self-center">In progress&hellip;</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Configuring (default form) ─────────────────────────────────────────────
+
   const submitLabel = busy
     ? (mode === 'override' ? 'Writing override…' : 'Applying…')
     : (mode === 'override' ? 'Write override' : 'Apply fix');
