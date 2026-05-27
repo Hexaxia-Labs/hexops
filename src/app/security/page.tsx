@@ -6,6 +6,7 @@ import { SecuritySummaryBar } from '@/components/security/security-summary-bar';
 import { ProjectSecurityAccordion } from '@/components/security/project-security-accordion';
 import type { SourceResult, Finding } from '@/lib/security/types';
 import { mapWithConcurrency } from '@/lib/concurrency';
+import { deriveParentPackage } from '@/lib/security/parent-package';
 
 interface ProjectsResponse { projects: Array<{ id: string; name: string }> }
 
@@ -45,6 +46,24 @@ function SecurityHubInner() {
       );
       setProjects(ps);
 
+      // Fetch active exceptions for all projects in parallel
+      const exceptionsEntries = await Promise.all(
+        ps.map(async (p) => {
+          try {
+            const r = await fetch(`/api/projects/${encodeURIComponent(p.id)}/security/exceptions`);
+            if (!r.ok) return [p.id, new Set<string>()] as const;
+            const j = await r.json();
+            const active = ((j.exceptions ?? []) as Array<{ revokedAt?: string; expiresAt?: string; parentPackage: string }>)
+              .filter((e) => !e.revokedAt && (!e.expiresAt || new Date(e.expiresAt) > new Date()));
+            return [p.id, new Set<string>(active.map((e) => e.parentPackage))] as const;
+          } catch {
+            return [p.id, new Set<string>()] as const;
+          }
+        }),
+      );
+      const exceptionsByProject: Record<string, Set<string>> = {};
+      for (const [pid, set] of exceptionsEntries) exceptionsByProject[pid] = set;
+
       // Per-project source map for the accordion headers, and per-project severity counts
       const sourcesMap: Record<string, Record<string, SourceResult>> = {};
       const perProj: Record<string, SeverityCounts> = {};
@@ -52,9 +71,16 @@ function SecurityHubInner() {
       const sev = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
       for (const p of (findingsRes as { projects?: Array<{ projectId: string; sources?: Record<string, SourceResult>; findings?: Array<{ severity?: string }> }> }).projects ?? []) {
         sourcesMap[p.projectId] = p.sources ?? {};
-        findingsMap[p.projectId] = (p.findings ?? []) as Finding[];
+        const excludedParents = exceptionsByProject[p.projectId] ?? new Set<string>();
+        const allFindings = (p.findings ?? []) as Finding[];
+        // Filter out findings whose parent package has an active exception
+        const filteredFindings = allFindings.filter((f) => {
+          const parent = deriveParentPackage(f);
+          return !parent || !excludedParents.has(parent);
+        });
+        findingsMap[p.projectId] = filteredFindings;
         const c: SeverityCounts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
-        for (const f of p.findings ?? []) {
+        for (const f of filteredFindings) {
           const s = (f.severity ?? '').toLowerCase();
           if (s === 'critical') { c.critical++; sev.critical++; }
           else if (s === 'high') { c.high++; sev.high++; }
