@@ -716,14 +716,53 @@ export function ProjectSecurityAccordion({
     ),
     run: async () => {
       const rc = remediationFromRows(report ? findingRows(report) : []);
-      const res = await fetch(`/api/security/cve-lite/${project.id}/fix`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'all', auditContext: { source: 'cve-lite', advisories: rc.advisories, severity: rc.severity } }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || (data as { ok?: boolean }).ok === false) throw new Error((data as { error?: string; summary?: string }).error ?? (data as { summary?: string }).summary ?? `fix failed (HTTP ${res.status})`);
-      await load(true);
-      await beginPendingCommit(rc);
+      const attemptId = `rem_${globalThis.crypto.randomUUID()}`;
+      let fixSucceeded = false;
+      try {
+        const res = await fetch(`/api/security/cve-lite/${project.id}/fix`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: 'all', auditContext: { source: 'cve-lite', advisories: rc.advisories, severity: rc.severity, attemptId } }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || (data as { ok?: boolean }).ok === false) throw new Error((data as { error?: string; summary?: string }).error ?? (data as { summary?: string }).summary ?? `fix failed (HTTP ${res.status})`);
+        fixSucceeded = true;
+        await load(true);
+        await beginPendingCommit(rc);
+      } catch (err) {
+        // Log failure outcome (fire-and-forget)
+        const msg = err instanceof Error ? err.message : 'fix failed';
+        fetch(`/api/projects/${project.id}/security/remediation/${attemptId}/complete`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            source: 'cve-lite',
+            outcome: {
+              status: 'error',
+              previousFindingCount: rc.packages.length,
+              currentFindingCount: rc.packages.length,
+              findingsCovered: rc.advisories,
+              error: msg,
+            },
+          }),
+        }).catch(() => {});
+        throw err;
+      }
+      // Log success outcome (fire-and-forget)
+      if (fixSucceeded) {
+        fetch(`/api/projects/${project.id}/security/remediation/${attemptId}/complete`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            source: 'cve-lite',
+            outcome: {
+              status: 'resolved',
+              previousFindingCount: rc.packages.length,
+              currentFindingCount: 0,
+              findingsCovered: rc.advisories,
+            },
+          }),
+        }).catch(() => {});
+      }
     },
   });
 
@@ -737,24 +776,64 @@ export function ProjectSecurityAccordion({
     ),
     run: async () => {
       const rc = remediationFromRow(row);
-      const res = await fetch(`/api/projects/${project.id}/update`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          packages: [{
-            name: row.package,
-            fromVersion: row.version,
-            toVersion: row.validatedFixVersion,
-            fixViaOverride: row.relationship === 'transitive',
-          }],
-          auditContext: { source: 'cve-lite', advisories: rc.advisories, severity: rc.severity },
-        }),
-      });
-      if (!res.ok) {
-        const e = await res.json().catch(() => ({}));
-        throw new Error((e as { error?: string }).error ?? `update failed (HTTP ${res.status})`);
+      const attemptId = `rem_${globalThis.crypto.randomUUID()}`;
+      let updateSucceeded = false;
+      try {
+        const res = await fetch(`/api/projects/${project.id}/update`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            packages: [{
+              name: row.package,
+              fromVersion: row.version,
+              toVersion: row.validatedFixVersion,
+              fixViaOverride: row.relationship === 'transitive',
+            }],
+            auditContext: { source: 'cve-lite', advisories: rc.advisories, severity: rc.severity, attemptId },
+          }),
+        });
+        if (!res.ok) {
+          const e = await res.json().catch(() => ({}));
+          throw new Error((e as { error?: string }).error ?? `update failed (HTTP ${res.status})`);
+        }
+        updateSucceeded = true;
+        await load(true);
+        await beginPendingCommit(rc);
+      } catch (err) {
+        // Log failure outcome (fire-and-forget)
+        const msg = err instanceof Error ? err.message : 'apply failed';
+        fetch(`/api/projects/${project.id}/security/remediation/${attemptId}/complete`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            source: 'cve-lite',
+            outcome: {
+              status: 'error',
+              previousFindingCount: 1,
+              currentFindingCount: 1,
+              findingsCovered: rc.advisories,
+              error: msg,
+            },
+          }),
+        }).catch(() => {});
+        throw err;
       }
-      await load(true);
-      await beginPendingCommit(rc);
+      // Log success outcome (fire-and-forget)
+      if (updateSucceeded) {
+        fetch(`/api/projects/${project.id}/security/remediation/${attemptId}/complete`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            source: 'cve-lite',
+            outcome: {
+              status: 'resolved',
+              previousFindingCount: 1,
+              currentFindingCount: 0,
+              findingsCovered: rc.advisories,
+              findingsResolved: rc.advisories,
+            },
+          }),
+        }).catch(() => {});
+      }
     },
   });
 
