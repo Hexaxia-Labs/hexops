@@ -27,6 +27,8 @@ import { remediationFromRow, remediationFromRows } from '@/lib/security/remediat
 import type { SecurityException } from '@/lib/security/exceptions';
 import { ExceptionDialog } from '@/components/security/exception-dialog';
 import type { FindingState } from '@/lib/security/finding-states';
+import { RemediationPanel } from '@/components/security/remediation-panel';
+import { RemediationDialog } from '@/components/security/remediation-dialog';
 
 interface ConfirmState { title: string; body: ReactNode; run: () => Promise<void> }
 interface GitStatus { branch: string; ahead: number; behind: number; dirty: boolean }
@@ -202,10 +204,16 @@ function PackageRow({
   group,
   onFileException,
   findingStates,
+  onOpenRemediation,
+  onViewReferences,
+  projectId,
 }: {
   group: PackageGroup;
   onFileException?: (group: PackageGroup) => void;
   findingStates?: Record<string, FindingState>;
+  onOpenRemediation?: (g: PackageGroup, mode: 'apply' | 'override') => void;
+  onViewReferences?: (g: PackageGroup) => void;
+  projectId?: string;
 }) {
   const [open, setOpen] = useState(false);
   const total = group.findings.length;
@@ -288,6 +296,22 @@ function PackageRow({
       </div>
       {open && (
         <div id={bodyId} className="border-t border-zinc-800/60 bg-zinc-950/30 px-3 py-2 space-y-1">
+          {onOpenRemediation && projectId && (
+            <RemediationPanel
+              parentPackage={group.parentPackage}
+              reportedPackage={group.reportedPackage ?? group.package}
+              currentVersion={group.version}
+              fixedIn={group.fixedIn}
+              cveCount={group.findings.length}
+              sources={group.sourcesUnion}
+              references={Array.from(new Set(group.findings.flatMap(f => f.references)))}
+              isParentEmbedded={!!group.parentPackage && group.parentPackage !== (group.reportedPackage ?? group.package)}
+              projectId={projectId}
+              onApplyFix={() => onOpenRemediation(group, 'apply')}
+              onOverridePin={() => onOpenRemediation(group, 'override')}
+              onViewReferences={() => onViewReferences?.(group)}
+            />
+          )}
           {group.findings.map(f => <FindingRow key={f.dedupKey} finding={f} findingState={findingStates?.[f.dedupKey]} />)}
         </div>
       )}
@@ -454,6 +478,14 @@ export function ProjectSecurityAccordion({
   const [isPushing, setIsPushing] = useState(false);
   const [committed, setCommitted] = useState(false);
   const [pluginEntries, setPluginEntries] = useState<PluginCardEntry[]>([]);
+
+  // Remediation state (grype per-package panel actions)
+  const [remediation, setRemediation] = useState<{
+    group: PackageGroup;
+    mode: 'apply' | 'override';
+  } | null>(null);
+  const [remediationBusy, setRemediationBusy] = useState(false);
+  const [referencesFor, setReferencesFor] = useState<PackageGroup | null>(null);
 
   // "All findings" section collapse state — open by default when ≤10 findings
   const [findingsExpanded, setFindingsExpanded] = useState(
@@ -811,6 +843,61 @@ export function ProjectSecurityAccordion({
     }
   }, [editingException, project.id, fetchExceptions, onAnyDataChanged]);
 
+  const handleRemediationSubmit = useCallback(async ({
+    targetVersion,
+    viaOverride,
+  }: { targetVersion: string; viaOverride: boolean }) => {
+    if (!remediation) return;
+    const group = remediation.group;
+    const targetPkg = group.parentPackage ?? group.reportedPackage ?? group.package;
+    const fromVersion = group.version ?? '';
+    const advisories = Array.from(new Set(group.findings.flatMap(f => f.advisoryIds)));
+    const severity = group.worstSeverity;
+
+    setRemediationBusy(true);
+    try {
+      const res = await fetch(`/api/projects/${project.id}/update`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          packages: [{
+            name: targetPkg,
+            fromVersion,
+            toVersion: targetVersion,
+            fixViaOverride: viaOverride,
+          }],
+          auditContext: {
+            source: 'grype',
+            advisories,
+            severity,
+          },
+        }),
+      });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error((e as { error?: string }).error ?? `update failed (HTTP ${res.status})`);
+      }
+      setRemediation(null);
+      const rc = {
+        packages: [{
+          name: targetPkg,
+          fromVersion,
+          toVersion: targetVersion,
+          isSecurityFix: true,
+          vulnCount: group.findings.length,
+        }],
+        advisories,
+        severity,
+      };
+      await beginPendingCommit(rc);
+      onAnyDataChanged?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'remediation failed');
+    } finally {
+      setRemediationBusy(false);
+    }
+  }, [remediation, project.id, beginPendingCommit, onAnyDataChanged]);
+
   // Derived view
   const visibleReport: CveLiteOutput | null = report && importedOnly
     ? { ...report, findings: (report.findings ?? []).filter(f => deriveReachable(f.usage) === true) }
@@ -946,7 +1033,10 @@ export function ProjectSecurityAccordion({
                       key={g.key}
                       group={g}
                       findingStates={findingStates}
+                      projectId={project.id}
                       onFileException={AUTO_APPLY_ENABLED && g.parentPackage ? setFilingForGroup : undefined}
+                      onOpenRemediation={AUTO_APPLY_ENABLED ? (group, mode) => setRemediation({ group, mode }) : undefined}
+                      onViewReferences={(group) => setReferencesFor(group)}
                     />
                   ))}
                   {actionableGroups.length > 30 && (
@@ -1054,6 +1144,58 @@ export function ProjectSecurityAccordion({
           onCancel={() => setEditingException(null)}
           busy={editBusy}
         />
+      )}
+      {remediation && (
+        <RemediationDialog
+          targetPackage={remediation.group.parentPackage ?? remediation.group.reportedPackage ?? remediation.group.package}
+          currentVersion={remediation.group.version}
+          defaultTargetVersion={
+            remediation.group.parentPackage && remediation.group.parentPackage !== (remediation.group.reportedPackage ?? remediation.group.package)
+              ? 'latest'
+              : (remediation.group.fixedIn?.split(',')[0]?.trim() ?? 'latest')
+          }
+          cveCount={remediation.group.findings.length}
+          mode={remediation.mode}
+          note={
+            remediation.group.parentPackage && remediation.group.parentPackage !== (remediation.group.reportedPackage ?? remediation.group.package)
+              ? `Note: grype's fix versions describe the embedded artifact (${remediation.group.reportedPackage}). Bumping ${remediation.group.parentPackage} is the npm-level action; consult the package's release notes to find a release that resolves the underlying issue.`
+              : undefined
+          }
+          onSubmit={handleRemediationSubmit}
+          onCancel={() => setRemediation(null)}
+          busy={remediationBusy}
+        />
+      )}
+      {referencesFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true">
+          <div className="w-full max-w-xl rounded-lg border border-zinc-800 bg-zinc-950 shadow-xl">
+            <div className="border-b border-zinc-800 px-5 py-3 flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-medium text-zinc-100">
+                  References — {referencesFor.parentPackage ?? referencesFor.reportedPackage ?? referencesFor.package}
+                </h2>
+                <p className="text-xs text-zinc-500 mt-1">
+                  {Array.from(new Set(referencesFor.findings.flatMap(f => f.references))).length} link(s) across{' '}
+                  {referencesFor.findings.length} CVE(s)
+                </p>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setReferencesFor(null)}>Close</Button>
+            </div>
+            <div className="px-5 py-3 max-h-96 overflow-auto text-xs">
+              {Array.from(new Set(referencesFor.findings.flatMap(f => f.references))).map((url) => (
+                <a
+                  key={url}
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block py-1 text-blue-400 hover:text-blue-300 break-all"
+                >
+                  {url}
+                </a>
+              ))}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
