@@ -1,435 +1,111 @@
 'use client';
-import { useEffect, useState, useCallback, Suspense } from 'react';
-import type { ReactNode } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import type { CveLiteOutput, ScanOptions } from '@/lib/security/sources/cve-lite';
-import type { DbStatus } from '@/lib/security/cve-lite-db';
-import type { FindingRow } from '@/lib/security/cve-lite-view';
-import type { SourceResult } from '@/lib/security/types';
-import { selectFixPlan, findingRows, deriveReachable } from '@/lib/security/cve-lite-view';
-import { FleetProjectRail, type FleetProject } from '@/components/security/fleet-project-rail';
-import { FixPlan } from '@/components/security/cve-lite/fix-plan';
-import { CveLiteFindings } from '@/components/security/cve-lite/cve-lite-findings';
-import { CveLiteToolbar } from '@/components/security/cve-lite/cve-lite-toolbar';
-import { CveLiteScanControls } from '@/components/security/cve-lite/cve-lite-scan-controls';
-import { CveLiteManage } from '@/components/security/cve-lite/cve-lite-manage';
-import { ConfirmDialog } from '@/components/security/cve-lite/confirm-dialog';
 import { SecurityHeader } from '@/components/security/security-header';
 import { SecuritySummaryBar } from '@/components/security/security-summary-bar';
-import { SourcePluginCards } from '@/components/security/source-plugin-cards';
-import type { PluginCardEntry } from '@/lib/security/plugins/runner';
-import { AUTO_APPLY_ENABLED } from '@/lib/auto-apply-flag';
-import type { UpdatedPackage } from '@/lib/patch-commit-message';
-import { generatePatchCommitMessage } from '@/lib/patch-commit-message';
-import { remediationFromRow, remediationFromRows } from '@/lib/security/remediation-commit';
-import { PendingCommitBanner } from '@/components/security/cve-lite/pending-commit-banner';
+import { ProjectSecurityAccordion } from '@/components/security/project-security-accordion';
+import type { SourceResult } from '@/lib/security/types';
 
-interface ConfirmState { title: string; body: ReactNode; run: () => Promise<void> }
-interface GitStatus { branch: string; ahead: number; behind: number; dirty: boolean }
-interface PendingCommit {
-  packages: UpdatedPackage[];
-  advisories: string[];
-  severity?: string;
-  message: string;
-  isEditing: boolean;
-}
+interface ProjectsResponse { projects: Array<{ id: string; name: string }> }
 
 function SecurityHubInner() {
   const searchParams = useSearchParams();
   const initialProject = searchParams.get('project') ?? '';
 
-  const [railProjects, setRailProjects] = useState<FleetProject[]>([]);
-  const [allSources, setAllSources] = useState<Record<string, Record<string, SourceResult>>>({});
-  const [selected, setSelected] = useState<string>(initialProject);
-  const [report, setReport] = useState<CveLiteOutput | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [importedOnly, setImportedOnly] = useState(false);
-  const [scannedAt, setScannedAt] = useState<string | null>(null);
-  const [options, setOptions] = useState<ScanOptions>({});
-  const [dbStatus, setDbStatus] = useState<DbStatus | null>(null);
-  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [pendingCommit, setPendingCommit] = useState<PendingCommit | null>(null);
-  const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
-  const [isCommitting, setIsCommitting] = useState(false);
-  const [isPushing, setIsPushing] = useState(false);
-  const [committed, setCommitted] = useState(false);
-  const [pluginEntries, setPluginEntries] = useState<PluginCardEntry[]>([]);
+  const [projects, setProjects] = useState<Array<{ id: string; name: string }>>([]);
+  const [perProjectSources, setPerProjectSources] = useState<Record<string, Record<string, SourceResult>>>({});
+  const [allFindingsSeverity, setAllFindingsSeverity] = useState<{
+    critical: number; high: number; medium: number; low: number; info: number;
+  }>({ critical: 0, high: 0, medium: 0, low: 0, info: 0 });
+  const [refreshing, setRefreshing] = useState(false);
 
-  const refreshRail = useCallback(() => {
-    fetch('/api/security/cve-lite/summary')
-      .then(r => r.json())
-      .then(d => setRailProjects(
-        (d.projects ?? []).sort((a: FleetProject, b: FleetProject) => a.name.localeCompare(b.name))
-      ))
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    fetch('/api/security/cve-lite/summary')
-      .then(r => r.json())
-      .then((d) => {
-        const ps: FleetProject[] = (d.projects ?? []).sort(
-          (a: FleetProject, b: FleetProject) => a.name.localeCompare(b.name)
-        );
-        setRailProjects(ps);
-        if (!selected && ps.length) setSelected(ps[0].id);
-      })
-      .catch(() => {});
-
-    fetch('/api/security/findings')
-      .then(r => r.json())
-      .then((d) => {
-        const map: Record<string, Record<string, SourceResult>> = {};
-        for (const p of d.projects ?? []) map[p.projectId] = p.sources ?? {};
-        setAllSources(map);
-      })
-      .catch(() => {});
-
-    fetch('/api/security/cve-lite/db-status')
-      .then(r => r.json())
-      .then(setDbStatus)
-      .catch(() => {});
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const load = useCallback(async (force = false) => {
-    if (!selected) return;
-    setLoading(true); setError(null);
+  const refresh = useCallback(async () => {
+    setRefreshing(true);
     try {
-      const qs = new URLSearchParams();
-      if (force) qs.set('force', 'true');
-      if (options.minSeverity) qs.set('minSeverity', options.minSeverity);
-      if (options.prodOnly) qs.set('prodOnly', 'true');
-      if (options.onlyUsed) qs.set('onlyUsed', 'true');
-      if (options.all) qs.set('all', 'true');
-      const res = await fetch(`/api/security/cve-lite/${selected}?${qs.toString()}`);
-      if (!res.ok) {
-        const e = await res.json().catch(() => ({}));
-        throw new Error(e.error ?? `HTTP ${res.status}`);
-      }
-      setReport(await res.json());
-      setScannedAt(new Date().toISOString());
-      refreshRail();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'scan failed');
-      setReport(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [selected, options, refreshRail]);
+      const [projectsRes, findingsRes] = await Promise.all([
+        fetch('/api/projects').then(r => r.json() as Promise<ProjectsResponse>),
+        fetch('/api/security/findings').then(r => r.json()),
+      ]);
+      // Project list — sorted alphabetically for stable ordering
+      const ps = ((projectsRes as ProjectsResponse).projects ?? []).sort(
+        (a: { id: string; name: string }, b: { id: string; name: string }) => a.name.localeCompare(b.name)
+      );
+      setProjects(ps);
 
-  useEffect(() => { load(false); }, [load]);
-
-  // Fetch plugin status when project changes
-  useEffect(() => {
-    if (!selected) {
-      setPluginEntries([]);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const listRes = await fetch('/api/security/plugins');
-        if (!listRes.ok) return;
-        const listJson = await listRes.json();
-        const plugins: Array<{ id: string; name: string; kind: PluginCardEntry['kind']; detailRoute?: string }>
-          = listJson.plugins ?? [];
-        const entries = await Promise.all(
-          plugins.map(async (p) => {
-            const r = await fetch(`/api/security/plugins/${p.id}/status?projectId=${encodeURIComponent(selected)}`);
-            if (!r.ok) return null;
-            const j = await r.json();
-            return {
-              pluginId: j.pluginId,
-              name: p.name,
-              kind: p.kind,
-              host: j.host,
-              card: j.card,
-              detailRoute: p.detailRoute,
-            } as PluginCardEntry;
-          }),
-        );
-        if (!cancelled) {
-          setPluginEntries(entries.filter((e): e is PluginCardEntry => e !== null));
+      // Per-project source map for the accordion headers
+      const sourcesMap: Record<string, Record<string, SourceResult>> = {};
+      const sev = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+      for (const p of (findingsRes as { projects?: Array<{ projectId: string; sources?: Record<string, SourceResult>; findings?: Array<{ severity?: string }> }> }).projects ?? []) {
+        sourcesMap[p.projectId] = p.sources ?? {};
+        for (const f of p.findings ?? []) {
+          const s = (f.severity ?? '').toLowerCase();
+          if (s === 'critical') sev.critical++;
+          else if (s === 'high') sev.high++;
+          else if (s === 'medium' || s === 'moderate') sev.medium++;
+          else if (s === 'low') sev.low++;
+          else sev.info++;
         }
-      } catch {
-        if (!cancelled) setPluginEntries([]);
       }
-    })();
-    return () => { cancelled = true; };
-  }, [selected]);
-
-  const fetchGitStatus = useCallback(async (projectId: string): Promise<GitStatus | null> => {
-    try {
-      const res = await fetch(`/api/projects/${projectId}/git`);
-      if (!res.ok) return null;
-      const d = await res.json();
-      return { branch: d.branch ?? '', ahead: d.aheadCount ?? 0, behind: d.behindCount ?? 0, dirty: !!d.isDirty };
-    } catch {
-      return null;
+      setPerProjectSources(sourcesMap);
+      setAllFindingsSeverity(sev);
+    } finally {
+      setRefreshing(false);
     }
   }, []);
 
-  const beginPendingCommit = useCallback(
-    async (rc: { packages: UpdatedPackage[]; advisories: string[]; severity?: string }) => {
-      const status = await fetchGitStatus(selected);
-      setGitStatus(status);
-      // An apply can produce nothing to commit: "Fix all direct" (cve-lite --fix) on a
-      // transitive-only advisory is a no-op, and some fixes only touch gitignored node_modules.
-      // Don't open a commit banner that would dead-end on "No changes to commit".
-      if (!status?.dirty) {
-        setPendingCommit(null);
-        setCommitted(false);
-        setError('Fix ran, but there were no file changes to commit. A transitive advisory cannot be fixed by "Fix all direct" — use the per-finding Apply, which adds a package override.');
-        return;
-      }
-      setError(null);
-      const generated = generatePatchCommitMessage(rc.packages).full;
-      const message = generated || `chore(deps): apply cve-lite fixes in ${selected}`;
-      setPendingCommit({ ...rc, message, isEditing: false });
-      setCommitted(false);
-    },
-    [selected, fetchGitStatus],
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const findingsCount = useMemo(
+    () => allFindingsSeverity.critical + allFindingsSeverity.high + allFindingsSeverity.medium + allFindingsSeverity.low,
+    [allFindingsSeverity],
   );
 
-  const handleCommit = useCallback(async () => {
-    if (!pendingCommit) return;
-    setIsCommitting(true); setError(null);
-    try {
-      const res = await fetch(`/api/projects/${selected}/git-commit`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: pendingCommit.message, source: 'cve-lite', advisories: pendingCommit.advisories }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.success === false) throw new Error(data.error ?? `commit failed (HTTP ${res.status})`);
-      setCommitted(true);
-      setPendingCommit((pc) => (pc ? { ...pc, isEditing: false } : pc));
-      setGitStatus(await fetchGitStatus(selected));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'commit failed');
-    } finally {
-      setIsCommitting(false);
-    }
-  }, [pendingCommit, selected, fetchGitStatus]);
-
-  const handlePush = useCallback(async () => {
-    if (!pendingCommit) return;
-    setIsPushing(true); setError(null);
-    try {
-      const res = await fetch(`/api/projects/${selected}/git-push`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source: 'cve-lite', advisories: pendingCommit.advisories }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.success === false) throw new Error(data.error ?? `push failed (HTTP ${res.status})`);
-      setPendingCommit(null); setCommitted(false);
-      setGitStatus(await fetchGitStatus(selected));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'push failed');
-    } finally {
-      setIsPushing(false);
-    }
-  }, [pendingCommit, selected, fetchGitStatus]);
-
-  // Clear any pending commit when the user switches projects.
-  useEffect(() => {
-    setPendingCommit(null);
-    setCommitted(false);
-    setGitStatus(null);
-  }, [selected]);
-
-  const runConfirmed = async () => {
-    if (!confirm) return;
-    setBusy(true); setError(null);
-    try {
-      await confirm.run();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'action failed');
-    } finally {
-      setBusy(false); setConfirm(null);
-    }
-  };
-
-  const fixAll = () => setConfirm({
-    title: 'Fix all direct dependencies?',
-    body: (
-      <>
-        Runs <code>cve-lite --fix</code> in <b>{selected}</b>, rewriting package.json + lockfile
-        (may reinstall). A rescan runs after. You may need to restart that project&apos;s dev server.
-      </>
-    ),
-    run: async () => {
-      // Audit context covers all direct fixable findings — `cve-lite --fix` ignores the
-      // importedOnly/reachability filter, so derive from the unfiltered report, not `rows`.
-      const rc = remediationFromRows(report ? findingRows(report) : []);
-      const res = await fetch(`/api/security/cve-lite/${selected}/fix`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'all', auditContext: { source: 'cve-lite', advisories: rc.advisories, severity: rc.severity } }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.ok === false) throw new Error(data.error ?? data.summary ?? `fix failed (HTTP ${res.status})`);
-      await load(true);
-      await beginPendingCommit(rc);
-    },
-  });
-
-  const applyOne = (row: FindingRow) => setConfirm({
-    title: `Apply fix for ${row.package}?`,
-    body: (
-      <>
-        Updates <b>{row.package}</b> {row.version ?? '?'} → <b>{row.validatedFixVersion}</b> via the
-        patch pipeline{row.relationship === 'transitive' ? ' (flat override)' : ''}, then rescans.
-      </>
-    ),
-    run: async () => {
-      const rc = remediationFromRow(row);
-      const res = await fetch(`/api/projects/${selected}/update`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          packages: [{
-            name: row.package,
-            fromVersion: row.version,
-            toVersion: row.validatedFixVersion,
-            fixViaOverride: row.relationship === 'transitive',
-          }],
-          auditContext: { source: 'cve-lite', advisories: rc.advisories, severity: rc.severity },
-        }),
-      });
-      if (!res.ok) {
-        const e = await res.json().catch(() => ({}));
-        throw new Error(e.error ?? `update failed (HTTP ${res.status})`);
+  const lastScan = useMemo(
+    () => {
+      // Pick the latest startedAt across all sources, fall back to undefined.
+      let latest: string | undefined;
+      for (const proj of Object.values(perProjectSources)) {
+        for (const src of Object.values(proj)) {
+          if (!latest || (src.startedAt && src.startedAt > latest)) latest = src.startedAt;
+        }
       }
-      await load(true);
-      await beginPendingCommit(rc);
+      return latest;
     },
-  });
+    [perProjectSources],
+  );
 
-  const installSkill = () => setConfirm({
-    title: 'Generate cve-lite skill files?',
-    body: (
-      <>
-        Runs <code>cve-lite install-skill</code> in <b>{selected}</b>, writing AI-assistant skill
-        files into the project.
-      </>
-    ),
-    run: async () => {
-      const res = await fetch(`/api/security/cve-lite/${selected}/install-skill`, { method: 'POST' });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.ok === false) throw new Error(data.error ?? `install-skill failed (HTTP ${res.status})`);
-    },
-  });
-
-  const visibleReport: CveLiteOutput | null = report && importedOnly
-    ? { ...report, findings: (report.findings ?? []).filter(f => deriveReachable(f.usage) === true) }
-    : report;
-  const groups = visibleReport ? selectFixPlan(visibleReport) : [];
-  const rows = visibleReport ? findingRows(visibleReport) : [];
-  const selectedSources = allSources[selected] ?? {};
-
-  // Severity counts for the summary bar — derived from the current cve-lite report
-  const severityCounts = {
-    critical: 0, high: 0, medium: 0, low: 0, info: 0,
-  };
-  for (const f of visibleReport?.findings ?? []) {
-    const sev = (f.severity ?? '').toLowerCase();
-    if (sev === 'critical') severityCounts.critical++;
-    else if (sev === 'high') severityCounts.high++;
-    else if (sev === 'medium' || sev === 'moderate') severityCounts.medium++;
-    else if (sev === 'low') severityCounts.low++;
-    else severityCounts.info++;
-  }
-  const findingsCount = severityCounts.critical + severityCounts.high + severityCounts.medium + severityCounts.low;
-  const sourcesCount = Object.keys(selectedSources).length + pluginEntries.length;
+  // Count of unique sources across the fleet (e.g. pnpm-audit, grype, cve-lite)
+  const sourcesCount = useMemo(
+    () => new Set(Object.values(perProjectSources).flatMap(o => Object.keys(o))).size,
+    [perProjectSources],
+  );
 
   return (
-    <div className="flex" style={{ minHeight: 'calc(100vh - 4rem)' }}>
-      <FleetProjectRail
-        projects={railProjects}
-        selected={selected}
-        onSelect={setSelected}
+    <main className="flex-1 flex flex-col overflow-hidden">
+      <SecurityHeader
+        findingsCount={findingsCount}
+        sourcesCount={sourcesCount}
+        lastScan={lastScan}
+        scanning={refreshing}
+        onRescan={refresh}
       />
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* NEW chrome — full-width, mirrors Patches */}
-        <SecurityHeader
-          findingsCount={findingsCount}
-          sourcesCount={sourcesCount}
-          lastScan={scannedAt ?? undefined}
-          scanning={loading}
-          onRescan={() => load(true)}
-        />
-        <SecuritySummaryBar counts={severityCounts} />
-        <SourcePluginCards
-          sources={selectedSources}
-          plugins={pluginEntries}
-          sourceDeepLinks={{ 'cve-lite': '/security' }}
-        />
-
-        {/* Existing content — kept verbatim, just moved into a padded scroll container */}
-        <div className="flex-1 overflow-auto p-6 space-y-4">
-          <CveLiteToolbar
-            hideSelector
-            projectId={selected}
-            projects={[]}
-            selected={selected}
-            onSelect={setSelected}
-            scannedAt={scannedAt}
-            importedOnly={importedOnly}
-            onToggleImported={setImportedOnly}
-            onRescan={() => load(true)}
-          />
-          <CveLiteScanControls options={options} onChange={setOptions} />
-          <div className="flex items-center gap-4 flex-wrap text-xs border border-zinc-800 rounded-md px-3 py-2 bg-zinc-900/30">
-            <CveLiteManage
-              projectId={selected}
-              dbStatus={dbStatus}
-              onSynced={setDbStatus}
-              onInstallSkill={installSkill}
+      <SecuritySummaryBar counts={allFindingsSeverity} />
+      <div className="flex-1 overflow-auto p-6 space-y-3">
+        {projects.length === 0 ? (
+          <div className="text-sm text-zinc-500">{refreshing ? 'Loading projects…' : 'No projects.'}</div>
+        ) : (
+          projects.map(p => (
+            <ProjectSecurityAccordion
+              key={p.id}
+              project={p}
+              sources={perProjectSources[p.id] ?? {}}
+              startsExpanded={p.id === initialProject}
+              onAnyDataChanged={refresh}
             />
-          </div>
-          {pendingCommit && AUTO_APPLY_ENABLED && (
-            <PendingCommitBanner
-              packages={pendingCommit.packages}
-              message={pendingCommit.message}
-              isEditing={pendingCommit.isEditing}
-              ahead={gitStatus?.ahead ?? 0}
-              committed={committed}
-              isCommitting={isCommitting}
-              isPushing={isPushing}
-              onMessageChange={(msg) => setPendingCommit((pc) => (pc ? { ...pc, message: msg } : pc))}
-              onToggleEdit={() => setPendingCommit((pc) => (pc ? { ...pc, isEditing: !pc.isEditing } : pc))}
-              onCommit={handleCommit}
-              onPush={handlePush}
-              onDismiss={() => { setPendingCommit(null); setCommitted(false); }}
-            />
-          )}
-          {loading && <div className="text-sm text-zinc-500">Scanning…</div>}
-          {error && <div className="text-sm text-red-400">{error}</div>}
-          {!loading && !error && visibleReport && (
-            <>
-              <section>
-                <h2 className="text-sm font-medium text-zinc-300 mb-2">Fix plan</h2>
-                <FixPlan groups={groups} onFixAll={AUTO_APPLY_ENABLED ? fixAll : undefined} fixingAll={busy} />
-              </section>
-              <section>
-                <h2 className="text-sm font-medium text-zinc-300 mb-2">Findings</h2>
-                <CveLiteFindings rows={rows} onApply={AUTO_APPLY_ENABLED ? applyOne : undefined} />
-              </section>
-            </>
-          )}
-          {confirm && (
-            <ConfirmDialog
-              open
-              title={confirm.title}
-              body={confirm.body}
-              busy={busy}
-              onConfirm={runConfirmed}
-              onCancel={() => setConfirm(null)}
-            />
-          )}
-        </div>
+          ))
+        )}
       </div>
-    </div>
+    </main>
   );
 }
 
