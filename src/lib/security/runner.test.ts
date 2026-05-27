@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { _setCacheDirForTest } from './persistence';
+import { _setFindingStatesDirForTest } from './finding-states';
 import { scanProjectWithSources } from './runner';
 import type { ScanSource, Finding } from './types';
 import type { ProjectConfig } from '../types';
@@ -36,7 +37,11 @@ let dir: string;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'hexops-runner-'));
   _setCacheDirForTest(dir);
-  return () => rmSync(dir, { recursive: true, force: true });
+  _setFindingStatesDirForTest(dir);
+  return () => {
+    _setFindingStatesDirForTest(undefined);
+    rmSync(dir, { recursive: true, force: true });
+  };
 });
 
 describe('runner.scanProjectWithSources', () => {

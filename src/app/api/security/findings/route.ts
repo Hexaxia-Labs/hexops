@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getProjects } from '@/lib/config';
 import { readSecurityCache } from '@/lib/security/persistence';
+import { getFindingStates } from '@/lib/security/finding-states';
 
 export async function GET(req: NextRequest) {
   const projectFilter = req.nextUrl.searchParams.get('project');
@@ -15,6 +16,7 @@ export async function GET(req: NextRequest) {
         timestamp: cached?.timestamp ?? null,
         sources: cached?.sources ?? {},
         findings: cached?.findings ?? [],
+        findingStates: getFindingStates(p.id),
       };
     });
   return NextResponse.json({ projects: perProject });

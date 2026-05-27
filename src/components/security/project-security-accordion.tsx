@@ -26,6 +26,7 @@ import { generatePatchCommitMessage } from '@/lib/patch-commit-message';
 import { remediationFromRow, remediationFromRows } from '@/lib/security/remediation-commit';
 import type { SecurityException } from '@/lib/security/exceptions';
 import { ExceptionDialog } from '@/components/security/exception-dialog';
+import type { FindingState } from '@/lib/security/finding-states';
 
 interface ConfirmState { title: string; body: ReactNode; run: () => Promise<void> }
 interface GitStatus { branch: string; ahead: number; behind: number; dirty: boolean }
@@ -42,6 +43,7 @@ export interface ProjectSecurityAccordionProps {
   sources: Record<string, SourceResult>;
   severity?: { critical: number; high: number; medium: number; low: number; info?: number };
   findings?: Finding[];
+  findingStates?: Record<string, FindingState>;
   startsExpanded?: boolean;
   onAnyDataChanged?: () => void;
 }
@@ -138,10 +140,24 @@ function buildHoverText(f: Finding): string {
   return parts.join('\n\n');
 }
 
+// ─── relativeTime helper ──────────────────────────────────────────────────────
+
+function relativeTime(iso: string): string {
+  const d = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (d < 60) return 'just now';
+  if (d < 3600) return `${Math.round(d / 60)}m ago`;
+  if (d < 86400) return `${Math.round(d / 3600)}h ago`;
+  if (d < 604800) return `${Math.round(d / 86400)}d ago`;
+  return `${Math.round(d / 604800)}w ago`;
+}
+
 // ─── FindingRow — individual CVE row ─────────────────────────────────────────
 
-function FindingRow({ finding: f }: { finding: Finding }) {
+function FindingRow({ finding: f, findingState }: { finding: Finding; findingState?: FindingState }) {
   const sev = (f.severity ?? 'info').toLowerCase();
+  const firstSeen = findingState?.firstSeenAt;
+  const firstSeenLabel = firstSeen ? relativeTime(firstSeen) : undefined;
+  const isNew = firstSeen && (Date.now() - new Date(firstSeen).getTime()) < 24 * 60 * 60 * 1000;
   return (
     <div className="flex items-center gap-2 bg-zinc-900/40 hover:bg-zinc-900/60 transition-colors px-3 py-2 rounded border border-zinc-800/60 text-xs">
       <span className={`shrink-0 px-1.5 py-0.5 rounded border ${SEVERITY_BADGE[sev] ?? SEVERITY_BADGE.info}`}>{sev}</span>
@@ -163,6 +179,14 @@ function FindingRow({ finding: f }: { finding: Finding }) {
         )}
         <span className="opacity-75">{f.sources.join(' + ')}</span>
         {f.fixedIn && <span className="text-zinc-400">fix: {f.fixedIn}</span>}
+        {firstSeenLabel && (
+          <span className="text-zinc-500 shrink-0 text-[0.7rem]">first seen {firstSeenLabel}</span>
+        )}
+        {isNew && (
+          <span className="shrink-0 px-1.5 py-0.5 rounded border border-blue-500/30 text-blue-400 bg-blue-500/10 text-[0.7rem]">
+            new
+          </span>
+        )}
       </div>
     </div>
   );
@@ -173,9 +197,11 @@ function FindingRow({ finding: f }: { finding: Finding }) {
 function PackageRow({
   group,
   onFileException,
+  findingStates,
 }: {
   group: PackageGroup;
   onFileException?: (group: PackageGroup) => void;
+  findingStates?: Record<string, FindingState>;
 }) {
   const [open, setOpen] = useState(false);
   const total = group.findings.length;
@@ -254,7 +280,7 @@ function PackageRow({
       </div>
       {open && (
         <div id={bodyId} className="border-t border-zinc-800/60 bg-zinc-950/30 px-3 py-2 space-y-1">
-          {group.findings.map(f => <FindingRow key={f.dedupKey} finding={f} />)}
+          {group.findings.map(f => <FindingRow key={f.dedupKey} finding={f} findingState={findingStates?.[f.dedupKey]} />)}
         </div>
       )}
     </div>
@@ -390,6 +416,7 @@ export function ProjectSecurityAccordion({
   sources,
   severity,
   findings,
+  findingStates = {},
   startsExpanded = false,
   onAnyDataChanged,
 }: ProjectSecurityAccordionProps) {
@@ -910,6 +937,7 @@ export function ProjectSecurityAccordion({
                     <PackageRow
                       key={g.key}
                       group={g}
+                      findingStates={findingStates}
                       onFileException={AUTO_APPLY_ENABLED && g.parentPackage ? setFilingForGroup : undefined}
                     />
                   ))}

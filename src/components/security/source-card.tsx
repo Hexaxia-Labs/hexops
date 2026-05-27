@@ -8,6 +8,12 @@ const SOURCE_DISPLAY_NAMES: Record<string, string> = {
   'cve-lite': 'cve-lite',
 };
 
+const SOURCE_SCOPE: Record<string, string> = {
+  'pnpm-audit': 'lockfile scanner',
+  'cve-lite':   'lockfile scanner',
+  'grype':      'filesystem/binary scanner',
+};
+
 interface Tone {
   dot: string;
   text: string;
@@ -59,6 +65,11 @@ export function SourceCard({ result, deepLinkHref }: SourceCardProps) {
       <div className="mt-1 text-xs text-zinc-500">
         ScanSource · {Math.round(result.durationMs)}ms
       </div>
+      {SOURCE_SCOPE[result.id] && (
+        <div className="mt-0.5 text-[0.65rem] text-zinc-600 italic">
+          {SOURCE_SCOPE[result.id]}
+        </div>
+      )}
       {deepLinkHref && (
         <a
           href={deepLinkHref}

@@ -24,6 +24,10 @@ const STATUS_TONE: Record<
   error: { dot: 'bg-red-500', text: 'text-red-400', border: 'border-red-700/60' },
 };
 
+const PLUGIN_SCOPE: Record<string, string> = {
+  'safe-chain': 'install-time interceptor',
+};
+
 export interface PluginCardProps {
   entry: PluginCardEntry;
 }
@@ -45,6 +49,11 @@ export function PluginCard({ entry }: PluginCardProps) {
       <div className="mt-1 text-xs text-zinc-500">
         SecurityPlugin ({entry.kind}) · {entry.card.headline}
       </div>
+      {PLUGIN_SCOPE[entry.pluginId] && (
+        <div className="mt-0.5 text-[0.65rem] text-zinc-600 italic">
+          {PLUGIN_SCOPE[entry.pluginId]}
+        </div>
+      )}
       {entry.card.detail && (
         <div className="mt-1 text-xs text-zinc-500">{entry.card.detail}</div>
       )}

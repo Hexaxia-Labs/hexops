@@ -5,6 +5,7 @@ import { SecurityHeader, type ScanSourceId } from '@/components/security/securit
 import { SecuritySummaryBar } from '@/components/security/security-summary-bar';
 import { ProjectSecurityAccordion } from '@/components/security/project-security-accordion';
 import type { SourceResult, Finding } from '@/lib/security/types';
+import type { FindingState } from '@/lib/security/finding-states';
 import { mapWithConcurrency } from '@/lib/concurrency';
 import { deriveParentPackage } from '@/lib/security/parent-package';
 
@@ -26,6 +27,7 @@ function SecurityHubInner() {
   const [perProjectSources, setPerProjectSources] = useState<Record<string, Record<string, SourceResult>>>({});
   const [perProjectSeverity, setPerProjectSeverity] = useState<Record<string, SeverityCounts>>({});
   const [perProjectFindings, setPerProjectFindings] = useState<Record<string, Finding[]>>({});
+  const [perProjectFindingStates, setPerProjectFindingStates] = useState<Record<string, Record<string, FindingState>>>({});
   const [allFindingsSeverity, setAllFindingsSeverity] = useState<{
     critical: number; high: number; medium: number; low: number; info: number;
   }>({ critical: 0, high: 0, medium: 0, low: 0, info: 0 });
@@ -68,9 +70,11 @@ function SecurityHubInner() {
       const sourcesMap: Record<string, Record<string, SourceResult>> = {};
       const perProj: Record<string, SeverityCounts> = {};
       const findingsMap: Record<string, Finding[]> = {};
+      const findingStatesMap: Record<string, Record<string, FindingState>> = {};
       const sev = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
-      for (const p of (findingsRes as { projects?: Array<{ projectId: string; sources?: Record<string, SourceResult>; findings?: Array<{ severity?: string }> }> }).projects ?? []) {
+      for (const p of (findingsRes as { projects?: Array<{ projectId: string; sources?: Record<string, SourceResult>; findings?: Array<{ severity?: string }>; findingStates?: Record<string, FindingState> }> }).projects ?? []) {
         sourcesMap[p.projectId] = p.sources ?? {};
+        findingStatesMap[p.projectId] = p.findingStates ?? {};
         const excludedParents = exceptionsByProject[p.projectId] ?? new Set<string>();
         const allFindings = (p.findings ?? []) as Finding[];
         // Filter out findings whose parent package has an active exception
@@ -93,6 +97,7 @@ function SecurityHubInner() {
       setPerProjectSources(sourcesMap);
       setPerProjectSeverity(perProj);
       setPerProjectFindings(findingsMap);
+      setPerProjectFindingStates(findingStatesMap);
       setAllFindingsSeverity(sev);
     } catch {
       // best-effort — leave previous state intact on network error
@@ -225,6 +230,7 @@ function SecurityHubInner() {
               sources={perProjectSources[p.id] ?? {}}
               severity={perProjectSeverity[p.id]}
               findings={perProjectFindings[p.id] ?? []}
+              findingStates={perProjectFindingStates[p.id] ?? {}}
               startsExpanded={p.id === initialProject}
               onAnyDataChanged={refresh}
             />
