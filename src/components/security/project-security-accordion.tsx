@@ -179,12 +179,22 @@ function PackageRow({
 }) {
   const [open, setOpen] = useState(false);
   const total = group.findings.length;
+  const bodyId = `pkg-${group.key}-body`;
   return (
     <div className="border border-zinc-800/60 rounded overflow-hidden">
-      <button
-        type="button"
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        aria-controls={bodyId}
         onClick={() => setOpen(x => !x)}
-        className="w-full flex items-center gap-2 bg-zinc-900/40 hover:bg-zinc-900/60 transition-colors px-3 py-2 text-xs text-left"
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setOpen(x => !x);
+          }
+        }}
+        className="w-full flex items-center gap-2 bg-zinc-900/40 hover:bg-zinc-900/60 transition-colors px-3 py-2 text-xs text-left cursor-pointer"
       >
         {open
           ? <ChevronDown className="h-3.5 w-3.5 text-zinc-500" />
@@ -241,9 +251,9 @@ function PackageRow({
             </button>
           )}
         </div>
-      </button>
+      </div>
       {open && (
-        <div className="border-t border-zinc-800/60 bg-zinc-950/30 px-3 py-2 space-y-1">
+        <div id={bodyId} className="border-t border-zinc-800/60 bg-zinc-950/30 px-3 py-2 space-y-1">
           {group.findings.map(f => <FindingRow key={f.dedupKey} finding={f} />)}
         </div>
       )}
