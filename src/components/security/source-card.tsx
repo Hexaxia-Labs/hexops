@@ -8,27 +8,33 @@ const SOURCE_DISPLAY_NAMES: Record<string, string> = {
   'cve-lite': 'cve-lite',
 };
 
-const STATUS_TONE: Record<
-  SourceResult['status'],
-  { dot: string; text: string; border: string }
-> = {
-  ok: { dot: 'bg-green-500', text: 'text-green-400', border: 'border-zinc-800' },
-  failed: {
-    dot: 'bg-red-500',
-    text: 'text-red-400',
-    border: 'border-red-700/60',
-  },
-  unavailable: {
-    dot: 'bg-zinc-500',
-    text: 'text-zinc-400',
-    border: 'border-zinc-800 opacity-70',
-  },
-  timeout: {
-    dot: 'bg-orange-500',
-    text: 'text-orange-400',
-    border: 'border-orange-700/60',
-  },
-};
+interface Tone {
+  dot: string;
+  text: string;
+  border: string;
+  label: string;
+}
+
+function pickTone(status: SourceResult['status'], findingCount: number): Tone {
+  if (status !== 'ok') {
+    const map: Record<Exclude<SourceResult['status'], 'ok'>, Tone> = {
+      failed:      { dot: 'bg-red-500',    text: 'text-red-400',    border: 'border-red-700/60',           label: 'failed'      },
+      unavailable: { dot: 'bg-zinc-500',   text: 'text-zinc-400',   border: 'border-zinc-800 opacity-70',  label: 'unavailable' },
+      timeout:     { dot: 'bg-orange-500', text: 'text-orange-400', border: 'border-orange-700/60',        label: 'timeout'     },
+    };
+    return map[status];
+  }
+  if (findingCount === 0) {
+    return { dot: 'bg-green-500', text: 'text-green-400', border: 'border-zinc-800', label: 'clean' };
+  }
+  // ok + findings > 0 — needs attention
+  return {
+    dot: 'bg-amber-500',
+    text: 'text-amber-400',
+    border: 'border-amber-700/60',
+    label: `${findingCount} finding${findingCount === 1 ? '' : 's'}`,
+  };
+}
 
 export interface SourceCardProps {
   result: SourceResult;
@@ -36,7 +42,7 @@ export interface SourceCardProps {
 }
 
 export function SourceCard({ result, deepLinkHref }: SourceCardProps) {
-  const tone = STATUS_TONE[result.status];
+  const tone = pickTone(result.status, result.findingCount);
   const display = SOURCE_DISPLAY_NAMES[result.id] ?? result.id;
 
   return (
@@ -47,13 +53,11 @@ export function SourceCard({ result, deepLinkHref }: SourceCardProps) {
         <div className="font-medium text-zinc-100">{display}</div>
         <div className="flex items-center gap-1.5">
           <div className={`w-1.5 h-1.5 rounded-full ${tone.dot}`} />
-          <span className={`text-xs ${tone.text}`}>{result.status}</span>
+          <span className={`text-xs ${tone.text}`}>{tone.label}</span>
         </div>
       </div>
       <div className="mt-1 text-xs text-zinc-500">
-        ScanSource · {result.findingCount} finding
-        {result.findingCount === 1 ? '' : 's'} · {Math.round(result.durationMs)}
-        ms
+        ScanSource · {Math.round(result.durationMs)}ms
       </div>
       {deepLinkHref && (
         <a
