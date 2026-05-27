@@ -35,7 +35,12 @@ interface UpdateRequestBody {
     fixByParent?: { name: string; version: string };
   }>;
   lockfileResolution?: LockfileResolutionMode;
-  auditContext?: { source?: string; advisories?: string[]; severity?: string };
+  auditContext?: {
+    source?: string;
+    advisories?: string[];
+    severity?: string;
+    attemptId?: string;       // change-control tracking id
+  };
 }
 
 export async function POST(
@@ -53,6 +58,9 @@ export async function POST(
     const { id } = await params;
     const body: UpdateRequestBody = await request.json().catch(() => ({}));
     const packages = body.packages || [];
+
+    // Change-control: extract attemptId up-front so it's available to all log sites
+    const attemptId = body.auditContext?.attemptId;
 
     const project = getProject(id);
     if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 });
@@ -75,6 +83,28 @@ export async function POST(
     const resolution = await resolveLockfile(cwd, resolutionMode);
     if (!resolution.success) {
       return { status: 500, body: { success: false, error: `Lockfile resolution (${resolutionMode}) failed`, resolution } };
+    }
+
+    // Change-control: log intent before the install runs so failure cases still have a record
+    if (attemptId && body.auditContext?.source) {
+      logger.info('security', 'remediation_initiated', `Apply attempt ${attemptId} initiated for ${id}`, {
+        projectId: id,
+        meta: {
+          attemptId,
+          source: body.auditContext.source,
+          parameters: {
+            packages: body.packages?.map(p => ({
+              name: p.name,
+              fromVersion: p.fromVersion,
+              toVersion: p.toVersion,
+              fixViaOverride: p.fixViaOverride ?? false,
+            })) ?? [],
+            advisoryIds: body.auditContext.advisories ?? [],
+            severity: body.auditContext.severity,
+            lockfileResolution: body.lockfileResolution,
+          },
+        },
+      });
     }
 
     const packageManager = resolution.packageManager;
@@ -351,14 +381,15 @@ export async function POST(
       } catch { /* non-fatal */ }
     }
 
-    // Origin-tagged remediation audit trail (e.g. applied from the CVE Lite dashboard).
+    // Origin-tagged remediation audit trail (e.g. applied from the CVE Lite dashboard or grype panel).
     if (anySucceeded && body.auditContext?.source) {
       const successfulNames = results.filter(r => r.success).map(r => r.package).filter(n => n !== '*');
-      logger.info('patches', 'security_remediation_applied',
+      logger.info('security', 'remediation_install_complete',
         `Applied security fix in ${id}: ${successfulNames.join(', ') || '(reconcile)'}`,
         {
           projectId: id,
           meta: {
+            attemptId,                                       // may be undefined for non-change-control calls
             source: body.auditContext.source,
             advisories: body.auditContext.advisories ?? [],
             severity: body.auditContext.severity,
@@ -366,6 +397,20 @@ export async function POST(
             installGate: activeGatePlugin
               ? { plugin: activeGatePlugin, binOverride: installBinOverride }
               : undefined,
+          },
+        });
+    } else if (!anySucceeded && body.auditContext?.source) {
+      // Change-control: log failure so the audit trail captures intent even when install fails
+      logger.info('security', 'remediation_install_failed',
+        `Apply attempt ${attemptId ?? '(no-id)'} failed for ${id}`,
+        {
+          projectId: id,
+          meta: {
+            attemptId,
+            source: body.auditContext.source,
+            advisories: body.auditContext.advisories ?? [],
+            severity: body.auditContext.severity,
+            attemptedPackages: body.packages?.map(p => p.name) ?? [],
           },
         });
     }

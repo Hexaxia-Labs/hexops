@@ -492,6 +492,7 @@ export function ProjectSecurityAccordion({
     currentCount: number;
     error?: string;
   } | undefined>(undefined);
+  const [remediationAttemptId, setRemediationAttemptId] = useState<string | undefined>(undefined);
   const [referencesFor, setReferencesFor] = useState<PackageGroup | null>(null);
 
   // "All findings" section collapse state — open by default when ≤10 findings
@@ -615,11 +616,12 @@ export function ProjectSecurityAccordion({
     }
   }, [expanded]);
 
-  // Reset remediation phase/outcome whenever a dialog is opened fresh
+  // Reset remediation phase/outcome/attemptId whenever a dialog is opened fresh
   useEffect(() => {
     if (remediation) {
       setRemediationPhase('configuring');
       setRemediationOutcome(undefined);
+      setRemediationAttemptId(undefined);
     }
   }, [remediation]);
 
@@ -871,6 +873,10 @@ export function ProjectSecurityAccordion({
     const previousCount = group.findings.length;
     const groupKey = group.key;
 
+    // Change-control: generate a stable tracking id for this apply attempt
+    const attemptId = `rem_${globalThis.crypto.randomUUID()}`;
+    setRemediationAttemptId(attemptId);
+
     setRemediationBusy(true);
     setRemediationOutcome(undefined);
 
@@ -891,6 +897,7 @@ export function ProjectSecurityAccordion({
             source: 'grype',
             advisories,
             severity,
+            attemptId,
           },
         }),
       });
@@ -929,6 +936,31 @@ export function ProjectSecurityAccordion({
       else if (currentCount < previousCount) setRemediationPhase('partial');
       else setRemediationPhase('unresolved');
 
+      // Change-control: POST the verified outcome to the audit-log endpoint (fire-and-forget)
+      const findingsCovered = group.findings.map(f => f.dedupKey);
+      const findingsRemaining = stillMatching.map(f => f.dedupKey);
+      const findingsResolved = findingsCovered.filter(k => !new Set(findingsRemaining).has(k));
+      const outcomeStatus: 'resolved' | 'partial' | 'unresolved' = currentCount === 0
+        ? 'resolved'
+        : currentCount < previousCount
+          ? 'partial'
+          : 'unresolved';
+      fetch(`/api/projects/${project.id}/security/remediation/${attemptId}/complete`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          source: 'grype',
+          outcome: {
+            status: outcomeStatus,
+            previousFindingCount: previousCount,
+            currentFindingCount: currentCount,
+            findingsCovered,
+            findingsResolved,
+            findingsRemaining,
+          },
+        }),
+      }).catch(() => {/* swallow — best-effort audit log */});
+
       // Open the pending-commit banner so the user can review + commit the change
       const rc = {
         packages: [{
@@ -947,6 +979,22 @@ export function ProjectSecurityAccordion({
       const msg = err instanceof Error ? err.message : 'remediation failed';
       setRemediationOutcome({ previousCount, currentCount: previousCount, error: msg });
       setRemediationPhase('error');
+
+      // Change-control: report failure outcome (fire-and-forget)
+      fetch(`/api/projects/${project.id}/security/remediation/${attemptId}/complete`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          source: 'grype',
+          outcome: {
+            status: 'error',
+            previousFindingCount: previousCount,
+            currentFindingCount: previousCount,   // unknown — leave as previous
+            findingsCovered: group.findings.map(f => f.dedupKey),
+            error: msg,
+          },
+        }),
+      }).catch(() => {});
     } finally {
       setRemediationBusy(false);
     }
@@ -1217,18 +1265,21 @@ export function ProjectSecurityAccordion({
           }
           phase={remediationPhase}
           outcome={remediationOutcome}
+          attemptId={remediationAttemptId}
           onFileException={() => {
             // Close remediation dialog, open file-exception dialog targeting the same group
             const groupToFile = remediation.group;
             setRemediation(null);
             setRemediationPhase('configuring');
             setRemediationOutcome(undefined);
+            setRemediationAttemptId(undefined);
             setFilingForGroup(groupToFile);
           }}
           onClose={() => {
             setRemediation(null);
             setRemediationPhase('configuring');
             setRemediationOutcome(undefined);
+            setRemediationAttemptId(undefined);
           }}
           onSubmit={handleRemediationSubmit}
           onCancel={() => setRemediation(null)}
