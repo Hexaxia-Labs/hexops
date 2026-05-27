@@ -18,6 +18,16 @@ function buildSingleCmd(packageManager: string, spec: string, isWorkspace: boole
   return buildBatchCmd(packageManager, [spec], isWorkspace);
 }
 
+/**
+ * Rewrites the leading whitespace-delimited token of a shell command string.
+ * Used to substitute the package-manager binary (e.g. 'pnpm' → 'aikido-pnpm')
+ * when an installGate plugin is active.
+ */
+function applyBinOverride(cmd: string, override: string | undefined): string {
+  if (!override) return cmd;
+  return cmd.replace(/^\S+/, override);
+}
+
 function verifyInstalled(cwd: string, pkg: UpdatePackage): boolean {
   try {
     const nmPath = join(cwd, 'node_modules', pkg.name, 'package.json');
@@ -36,10 +46,14 @@ export async function installPackages(
   isWorkspace: boolean,
   cwd: string,
   projectId: string,
+  /** Optional override for the install binary leading token (e.g. 'aikido-pnpm').
+   *  When set, replaces the first whitespace-delimited token of every built install command
+   *  so that an installGate plugin (e.g. Safe Chain) can interpose on the install. */
+  installBinOverride?: string,
 ): Promise<UpdateResult[]> {
   const results: UpdateResult[] = [];
   const pkgSpecs = directPkgs.map(p => `${p.name}@${p.targetVersion}`);
-  const batchCmd = buildBatchCmd(packageManager, pkgSpecs, isWorkspace);
+  const batchCmd = applyBinOverride(buildBatchCmd(packageManager, pkgSpecs, isWorkspace), installBinOverride);
 
   let batchSuccess = false;
   let batchStdout = '';
@@ -167,7 +181,7 @@ export async function installPackages(
   logger.warn('patches', 'batch_fallback', `Batch install failed for ${projectId}, falling back to sequential`, { projectId });
 
   for (const pkg of directPkgs) {
-    const installCmd = buildSingleCmd(packageManager, `${pkg.name}@${pkg.targetVersion}`, isWorkspace);
+    const installCmd = applyBinOverride(buildSingleCmd(packageManager, `${pkg.name}@${pkg.targetVersion}`, isWorkspace), installBinOverride);
     try {
       const result = await execAsync(installCmd, { cwd, timeout: NPM_INSTALL_TIMEOUT });
       const combinedOutput = (result.stdout || '') + (result.stderr || '');

@@ -19,6 +19,8 @@ import { buildYarnUpdateCmd } from '@/lib/updaters/yarn';
 import { applyOverrides, removeOverrideConflicts, cleanStaleOverrides } from '@/lib/updaters/override';
 import { installPackages } from '@/lib/updaters/install';
 import { execAsync } from '@/lib/updaters/common';
+import { SECURITY_PLUGINS } from '@/lib/security/plugins';
+import { isPluginEnabledForProject } from '@/lib/security/plugins/config';
 import { AUTO_APPLY_ENABLED } from '@/lib/auto-apply-flag';
 import { runWithDevServerGuard } from '@/lib/process-manager';
 
@@ -87,6 +89,11 @@ export async function POST(
     } catch { /* ignore */ }
 
     const results: Array<{ package: string; success: boolean; output: string; error?: string }> = [];
+
+    // Install-gate state — set when an installGate plugin rewrites the binary;
+    // carried to the audit-trail log at the bottom of the closure.
+    let installBinOverride: string | undefined;
+    let activeGatePlugin: string | undefined;
 
     // Pre-flight health checks
     if (packageManager === 'npm' && packages.length > 1) {
@@ -198,7 +205,25 @@ export async function POST(
 
       if (directPkgs.length > 0) {
         removeOverrideConflicts(join(cwd, 'package.json'), directPkgs, packageManager, id);
-        const installResults = await installPackages(directPkgs, packageManager, isWorkspaceProject, cwd, id);
+
+        // Install-gate: Safe Chain (and any future installGate plugins) can rewrite
+        // the install binary to interpose between us and the package manager.
+        for (const plugin of SECURITY_PLUGINS) {
+          if (plugin.kind !== 'installGate') continue;
+          if (!isPluginEnabledForProject(project, plugin.id)) continue;
+          const wrapped = await plugin.wrapInstall({
+            project,
+            command: [packageManager],
+            env: process.env,
+          });
+          if (wrapped.command[0] && wrapped.command[0] !== packageManager) {
+            installBinOverride = wrapped.command[0];
+            activeGatePlugin = plugin.id;
+            break; // first enabled plugin wins; chaining is a future story
+          }
+        }
+
+        const installResults = await installPackages(directPkgs, packageManager, isWorkspaceProject, cwd, id, installBinOverride);
         results.push(...installResults);
       }
     } else {
@@ -338,6 +363,9 @@ export async function POST(
             advisories: body.auditContext.advisories ?? [],
             severity: body.auditContext.severity,
             packages: successfulNames,
+            installGate: activeGatePlugin
+              ? { plugin: activeGatePlugin, binOverride: installBinOverride }
+              : undefined,
           },
         });
     }
