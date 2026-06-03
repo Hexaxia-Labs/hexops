@@ -1,5 +1,5 @@
 import { spawn, ChildProcess, execFileSync } from 'child_process';
-import { appendFileSync, readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
+import { appendFileSync, readFileSync, existsSync, mkdirSync, writeFileSync, realpathSync, rmSync } from 'fs';
 import { join } from 'path';
 import type { ProjectConfig, LogEntry } from './types';
 import { logger } from './logger';
@@ -9,6 +9,7 @@ import { addNotification } from './notifications';
 interface ProcessEntry {
   process: ChildProcess;
   startedAt: Date;
+  mode: StartMode;
 }
 const activeProcesses = new Map<string, ProcessEntry>();
 const stoppingProjects = new Set<string>();
@@ -176,7 +177,7 @@ export function startProject(
     });
 
     const startedAt = new Date();
-    activeProcesses.set(project.id, { process: child, startedAt });
+    activeProcesses.set(project.id, { process: child, startedAt, mode });
 
     child.on('spawn', () => {
       const pid = child.pid;
@@ -386,4 +387,171 @@ export function getProcessInfo(projectId: string): { pid: number | null; started
 
 export function getTrackedProcesses(): string[] {
   return Array.from(activeProcesses.keys());
+}
+
+// ---------------------------------------------------------------------------
+// #109 — dev-server-aware patching
+//
+// Applying a patch runs `pnpm install`, which churns node_modules. If the target
+// project's dev server is live (esp. Turbopack), it loses node_modules/next
+// mid-reinstall and dies. This guard stops a managed server, applies, then
+// restarts it — and refuses outright when the target is hexops itself, because
+// the apply request is served by that very process (you cannot stop->apply->
+// restart the server handling the request).
+// ---------------------------------------------------------------------------
+
+export type DevServerGuardAction = 'passthrough' | 'orchestrate' | 'block-self';
+
+export interface DevServerGuardDecision {
+  action: DevServerGuardAction;
+  reason: string;
+}
+
+/** Decide how a patch/install against a project should treat its dev server. */
+export function decideDevServerGuard(input: {
+  isSelf: boolean;
+  isTracked: boolean;
+}): DevServerGuardDecision {
+  if (input.isSelf) {
+    return {
+      action: 'block-self',
+      reason:
+        'This patch targets hexops itself while its dev server is serving the request. ' +
+        'Applying here would run an install, churn node_modules, and kill the server ' +
+        'mid-apply. Apply from the CLI instead (or stop hexops first).',
+    };
+  }
+  if (input.isTracked) {
+    return {
+      action: 'orchestrate',
+      reason: 'A managed dev server is running; it will be stopped, patched, then restarted.',
+    };
+  }
+  return { action: 'passthrough', reason: 'No managed dev server is running for this project.' };
+}
+
+/** True when the project being patched is the hexops checkout we are running from. */
+export function isHexopsSelf(project: ProjectConfig): boolean {
+  const resolve = (p: string) => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return p;
+    }
+  };
+  return resolve(project.path) === resolve(process.cwd());
+}
+
+/** Mode a tracked project was started in (defaults to 'dev' when unknown). */
+export function getProcessMode(projectId: string): StartMode {
+  return activeProcesses.get(projectId)?.mode ?? 'dev';
+}
+
+function clearNextBuildDir(projectPath: string): void {
+  try {
+    rmSync(join(projectPath, '.next'), { recursive: true, force: true });
+  } catch {
+    // best-effort: a missing or locked .next must not abort the restart
+  }
+}
+
+export interface DevServerGuardDeps {
+  isSelf: (project: ProjectConfig) => boolean;
+  isRunning: (projectId: string) => boolean;
+  getMode: (projectId: string) => StartMode;
+  stop: (projectId: string, port: number) => { success: boolean; error?: string };
+  start: (project: ProjectConfig, mode: StartMode) => { success: boolean; error?: string };
+  clearBuildDir: (projectPath: string) => void;
+}
+
+const defaultDevServerGuardDeps: DevServerGuardDeps = {
+  isSelf: isHexopsSelf,
+  isRunning: isTracked,
+  getMode: getProcessMode,
+  stop: stopProject,
+  start: startProject,
+  clearBuildDir: clearNextBuildDir,
+};
+
+export interface DevServerGuardOutcome<T> {
+  decision: DevServerGuardAction;
+  reason: string;
+  blocked: boolean;
+  ranOperation: boolean;
+  stopped: boolean;
+  restarted: boolean;
+  restartError?: string;
+  result?: T;
+}
+
+/**
+ * Run a patch/install `operation` against `project`, guarding its dev server (#109).
+ *
+ * - block-self: refuses (operation never runs); caller should return an error.
+ * - orchestrate: stop -> operation -> (optional .next clear) -> restart. The server
+ *   is restored even if the operation throws (the error then propagates).
+ * - passthrough: runs the operation directly.
+ *
+ * `deps` is injectable for testing; defaults are bound to the real process manager.
+ */
+export async function runWithDevServerGuard<T>(
+  project: ProjectConfig,
+  operation: () => Promise<T>,
+  opts: { clearBuildDir?: boolean } = {},
+  deps: DevServerGuardDeps = defaultDevServerGuardDeps,
+): Promise<DevServerGuardOutcome<T>> {
+  const decision = decideDevServerGuard({
+    isSelf: deps.isSelf(project),
+    isTracked: deps.isRunning(project.id),
+  });
+
+  if (decision.action === 'block-self') {
+    return {
+      decision: decision.action,
+      reason: decision.reason,
+      blocked: true,
+      ranOperation: false,
+      stopped: false,
+      restarted: false,
+    };
+  }
+
+  if (decision.action === 'passthrough') {
+    const result = await operation();
+    return {
+      decision: decision.action,
+      reason: decision.reason,
+      blocked: false,
+      ranOperation: true,
+      stopped: false,
+      restarted: false,
+      result,
+    };
+  }
+
+  // orchestrate: capture the mode before stopping, restore in finally
+  const mode = deps.getMode(project.id);
+  const stopResult = deps.stop(project.id, project.port);
+  let result: T | undefined;
+  let restarted = false;
+  let restartError: string | undefined;
+  try {
+    result = await operation();
+  } finally {
+    if (opts.clearBuildDir) deps.clearBuildDir(project.path);
+    const startResult = deps.start(project, mode);
+    restarted = startResult.success;
+    if (!startResult.success) restartError = startResult.error;
+  }
+
+  return {
+    decision: decision.action,
+    reason: decision.reason,
+    blocked: false,
+    ranOperation: true,
+    stopped: stopResult.success,
+    restarted,
+    restartError,
+    result,
+  };
 }

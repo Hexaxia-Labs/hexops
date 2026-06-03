@@ -7,6 +7,7 @@ import { promisify } from 'util';
 import { detectPackageManager } from '@/lib/patch-scanner';
 import { invalidateProjectCache } from '@/lib/patch-storage';
 import { AUTO_APPLY_ENABLED } from '@/lib/auto-apply-flag';
+import { runWithDevServerGuard, decideDevServerGuard, isHexopsSelf, isTracked } from '@/lib/process-manager';
 
 const execAsync = promisify(exec);
 
@@ -32,6 +33,15 @@ export async function POST(
     const project = getProject(id);
     if (!project) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
+
+    // #109: refuse to churn node_modules out from under hexops's own dev server.
+    const guard = decideDevServerGuard({ isSelf: isHexopsSelf(project), isTracked: isTracked(id) });
+    if (guard.action === 'block-self') {
+      return NextResponse.json(
+        { success: false, error: guard.reason, devServerGuard: { action: guard.action, reason: guard.reason } },
+        { status: 409 },
+      );
     }
 
     const pkgJsonPath = join(project.path, 'package.json');
@@ -92,18 +102,30 @@ export async function POST(
       ? 'yarn install'
       : 'npm install --legacy-peer-deps';
 
-    let installOutput = '';
-    try {
-      const result = await execAsync(installCmd, { cwd: project.path, timeout: 120000 });
-      installOutput = (result.stdout || '') + (result.stderr || '');
-    } catch (err) {
-      const e = err as { stdout?: string; stderr?: string };
-      installOutput = (e.stdout || '') + (e.stderr || '');
-    }
+    // #109: stop a running dev server, reinstall, then restart it.
+    const guardOutcome = await runWithDevServerGuard(project, async () => {
+      try {
+        const result = await execAsync(installCmd, { cwd: project.path, timeout: 120000 });
+        return (result.stdout || '') + (result.stderr || '');
+      } catch (err) {
+        const e = err as { stdout?: string; stderr?: string };
+        return (e.stdout || '') + (e.stderr || '');
+      }
+    }, { clearBuildDir: true });
 
     invalidateProjectCache(id);
 
-    return NextResponse.json({ success: true, removed: pkgName, output: installOutput });
+    return NextResponse.json({
+      success: true,
+      removed: pkgName,
+      output: guardOutcome.result ?? '',
+      devServerGuard: {
+        action: guardOutcome.decision,
+        stopped: guardOutcome.stopped,
+        restarted: guardOutcome.restarted,
+        ...(guardOutcome.restartError ? { restartError: guardOutcome.restartError } : {}),
+      },
+    });
   } catch (error) {
     console.error('Error removing override:', error);
     return NextResponse.json({ error: 'Failed to remove override' }, { status: 500 });

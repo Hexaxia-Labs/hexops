@@ -46,6 +46,18 @@ export interface ProjectConfig {
   };
   propagation?: Partial<PropagationConfig>;
   autostart?: boolean;
+  /**
+   * Per-project SecurityPlugin settings. Optional; absence == default opt-out.
+   * Keyed by plugin id (e.g. 'safe-chain').
+   */
+  plugins?: Record<string, ProjectPluginConfig>;
+}
+
+export interface ProjectPluginConfig {
+  enabled?: boolean;
+  // Plugins MAY extend this shape via declaration merging in their own
+  // module if they need plugin-specific config. Keep the base intentionally
+  // minimal — most plugins should ship with sensible defaults.
 }
 
 export interface ProjectExtendedStatus {

@@ -10,6 +10,9 @@ vi.mock('@/lib/config', () => ({
 vi.mock('@/lib/security/persistence', () => ({
   readSecurityCache: vi.fn().mockReturnValue(null),
 }));
+vi.mock('@/lib/security/finding-states', () => ({
+  getFindingStates: vi.fn().mockReturnValue({}),
+}));
 
 import { GET } from './route';
 
@@ -34,5 +37,13 @@ describe('GET /api/security/findings', () => {
     const res = await GET(req);
     const data = await res.json();
     expect(data.projects).toHaveLength(0);
+  });
+
+  it('includes findingStates per project', async () => {
+    const req = new NextRequest('http://localhost/api/security/findings');
+    const res = await GET(req);
+    const data = await res.json();
+    expect(data.projects[0]).toHaveProperty('findingStates');
+    expect(typeof data.projects[0].findingStates).toBe('object');
   });
 });

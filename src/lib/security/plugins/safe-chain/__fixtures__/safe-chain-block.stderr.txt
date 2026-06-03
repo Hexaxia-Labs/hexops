@@ -1,0 +1,4 @@
+[safe-chain] checking 23 packages against malware intel...
+[safe-chain] BLOCKED: package "evil-pkg@1.0.0" matched malware advisory MAL-2026-0123
+[safe-chain] BLOCKED: package "typo-react@18.0.0" matched malware advisory MAL-2026-0456
+Refusing to install. See https://aikido.dev for details.

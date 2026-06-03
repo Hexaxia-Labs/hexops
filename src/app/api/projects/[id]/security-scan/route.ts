@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getProject } from '@/lib/config';
-import { scanProject } from '@/lib/security/runner';
+import { scanProject, scanProjectWithSources } from '@/lib/security/runner';
+import { SOURCES } from '@/lib/security/sources';
 import { logger } from '@/lib/logger';
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
@@ -12,7 +13,17 @@ export async function POST(
   if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 });
 
   try {
-    const result = await scanProject(project);
+    const url = new URL(req.url);
+    const filter = url.searchParams.get('sources');
+    const subset = filter
+      ? SOURCES.filter(s => filter.split(',').map(x => x.trim()).includes(s.id))
+      : SOURCES;
+    if (subset.length === 0) {
+      return NextResponse.json({ error: `No sources matched: ${filter}` }, { status: 400 });
+    }
+    const result = subset.length === SOURCES.length
+      ? await scanProject(project)
+      : await scanProjectWithSources(project, subset);
     return NextResponse.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Security scan failed';

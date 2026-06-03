@@ -3,6 +3,8 @@ import type { Finding, ScanResult, ScanSource, SourceResult, SourceStatus } from
 import { mergeFindings } from './merger';
 import { writeSecurityCache } from './persistence';
 import { SOURCES } from './sources';
+import { applyScan } from './finding-states';
+import { logger } from '../logger';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const inflight = new Map<string, Promise<ScanResult>>();
@@ -101,6 +103,47 @@ export async function scanProjectWithSources(project: ProjectConfig, sources: Sc
       sources: sourcesRecord,
       findings,
     };
+
+    // Diff findings against stored states BEFORE writing cache so lifecycle
+    // log entries appear in order with the scan completion.
+    const diff = applyScan(project.id, findings);
+    const findingByKey = new Map(findings.map(f => [f.dedupKey, f] as const));
+
+    for (const key of diff.newlyDetected) {
+      const f = findingByKey.get(key);
+      logger.info('security', 'finding_detected', `New finding ${key} in ${project.id}`, {
+        projectId: project.id,
+        meta: {
+          findingId: key,
+          severity: f?.severity,
+          package: f?.package,
+          version: f?.version,
+          advisoryIds: f?.advisoryIds,
+          sources: f?.sources,
+        },
+      });
+    }
+    for (const key of diff.redetected) {
+      const f = findingByKey.get(key);
+      logger.info('security', 'finding_redetected', `Finding ${key} returned in ${project.id}`, {
+        projectId: project.id,
+        meta: {
+          findingId: key,
+          severity: f?.severity,
+          package: f?.package,
+          version: f?.version,
+          advisoryIds: f?.advisoryIds,
+          sources: f?.sources,
+        },
+      });
+    }
+    for (const key of diff.resolved) {
+      logger.info('security', 'finding_resolved', `Finding ${key} resolved in ${project.id}`, {
+        projectId: project.id,
+        meta: { findingId: key },
+      });
+    }
+
     writeSecurityCache(project.id, result);
     return result;
   })();
