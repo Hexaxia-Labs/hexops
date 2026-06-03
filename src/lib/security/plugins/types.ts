@@ -54,3 +54,17 @@ export interface ComplianceAuditPlugin extends SecurityPluginBase {
 }
 
 export type SecurityPlugin = InstallGatePlugin | ComplianceAuditPlugin;
+
+/**
+ * UI-facing per-plugin card payload. Built by the per-project status endpoint
+ * (and assembled client-side in the security accordion). The shape is the
+ * contract the SourcePluginCards / PluginCard components consume.
+ */
+export interface PluginCardEntry {
+  pluginId: string;
+  name: string;
+  kind: SecurityPlugin['kind'];
+  host: PluginHostStatus;
+  card: PluginCardData;
+  detailRoute?: string;
+}

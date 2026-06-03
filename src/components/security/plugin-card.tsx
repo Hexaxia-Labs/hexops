@@ -1,6 +1,6 @@
 'use client';
 
-import type { PluginCardEntry } from '@/lib/security/plugins/runner';
+import type { PluginCardEntry } from '@/lib/security/plugins/types';
 
 const STATUS_TONE: Record<
   PluginCardEntry['card']['status'],

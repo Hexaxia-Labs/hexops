@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { PluginCard, type PluginCardProps } from './plugin-card';
-import type { PluginCardEntry } from '@/lib/security/plugins/runner';
+import type { PluginCardEntry } from '@/lib/security/plugins/types';
 
 describe('PluginCard', () => {
   it('exports PluginCard component and PluginCardProps type', () => {

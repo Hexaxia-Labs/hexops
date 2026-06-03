@@ -19,7 +19,7 @@ import { CveLiteManage } from '@/components/security/cve-lite/cve-lite-manage';
 import { ConfirmDialog } from '@/components/security/cve-lite/confirm-dialog';
 import { PendingCommitBanner } from '@/components/security/cve-lite/pending-commit-banner';
 import { SourcePluginCards } from '@/components/security/source-plugin-cards';
-import type { PluginCardEntry } from '@/lib/security/plugins/runner';
+import type { PluginCardEntry } from '@/lib/security/plugins/types';
 import { AUTO_APPLY_ENABLED } from '@/lib/auto-apply-flag';
 import type { UpdatedPackage } from '@/lib/patch-commit-message';
 import { generatePatchCommitMessage } from '@/lib/patch-commit-message';
@@ -1239,7 +1239,6 @@ export function ProjectSecurityAccordion({
           <SourcePluginCards
             sources={sources}
             plugins={pluginEntries}
-            sourceDeepLinks={{ 'cve-lite': '/security' }}
           />
           <CveLiteToolbar
             hideSelector

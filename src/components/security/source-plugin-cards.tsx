@@ -1,7 +1,7 @@
 'use client';
 
 import type { SourceResult } from '@/lib/security/types';
-import type { PluginCardEntry } from '@/lib/security/plugins/runner';
+import type { PluginCardEntry } from '@/lib/security/plugins/types';
 import { SourceCard } from './source-card';
 import { PluginCard } from './plugin-card';
 

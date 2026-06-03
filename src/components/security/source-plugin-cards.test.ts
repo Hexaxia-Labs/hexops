@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { SourcePluginCards, type SourcePluginCardsProps } from './source-plugin-cards';
 import type { SourceResult } from '@/lib/security/types';
-import type { PluginCardEntry } from '@/lib/security/plugins/runner';
+import type { PluginCardEntry } from '@/lib/security/plugins/types';
 
 describe('SourcePluginCards', () => {
   it('exports SourcePluginCards component and SourcePluginCardsProps type', () => {
