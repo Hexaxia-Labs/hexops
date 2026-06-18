@@ -1,3 +1,9 @@
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import type { ScanSource, Finding } from '../types';
+import type { ProjectConfig } from '../../types';
+import { logger } from '../../logger';
+
 // Node builtins (roots only; subpaths reduce to root via rootPkg, node: handled by isBare)
 const BUILTINS = new Set([
   'assert', 'async_hooks', 'buffer', 'child_process', 'cluster', 'console', 'constants',
@@ -106,3 +112,183 @@ export function detectPhantomDeps(input: PhantomScanInput): PhantomFinding[] {
   }
   return findings.sort((a, b) => a.pkg.localeCompare(b.pkg));
 }
+
+const SRC_DIRS = ['src', 'app', 'pages', 'lib', 'components', 'server', 'config', 'scripts'];
+const SKIP_DIRS = new Set(['node_modules', '.next', '.git', 'dist', 'build', 'out', 'coverage', '.turbo', '.vercel', '.pnpm']);
+const SRC_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts']);
+const MAX_FILE_BYTES = 512 * 1024;
+const MAX_FILES = 5000;
+
+interface PkgJson {
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+  optionalDependencies?: Record<string, string>;
+  overrides?: Record<string, unknown>;
+  resolutions?: Record<string, unknown>;
+  pnpm?: { overrides?: Record<string, unknown> };
+  packageManager?: string;
+  workspaces?: string[] | { packages?: string[] };
+  name?: string;
+  version?: string;
+}
+
+async function exists(p: string): Promise<boolean> {
+  try { await fs.access(p); return true; } catch { return false; }
+}
+
+async function resolvePM(pkg: PkgJson, root: string): Promise<PackageManager> {
+  const field = typeof pkg.packageManager === 'string' ? pkg.packageManager.split('@')[0] : '';
+  if (field === 'pnpm' || field === 'npm' || field === 'yarn') return field;
+  if (await exists(path.join(root, 'pnpm-lock.yaml'))) return 'pnpm';
+  if (await exists(path.join(root, 'package-lock.json'))) return 'npm';
+  if (await exists(path.join(root, 'yarn.lock'))) return 'yarn';
+  return 'unknown';
+}
+
+async function resolveWorkspaceNames(pkg: PkgJson, root: string): Promise<Set<string>> {
+  const names = new Set<string>();
+  const ws = pkg.workspaces;
+  const patterns: string[] = Array.isArray(ws) ? ws : Array.isArray(ws?.packages) ? ws.packages : [];
+  for (const pat of patterns) {
+    if (!pat.endsWith('/*')) continue;
+    const base = path.join(root, pat.slice(0, -2));
+    let entries: string[] = [];
+    try { entries = await fs.readdir(base); } catch { continue; }
+    for (const e of entries) {
+      try {
+        const pj = JSON.parse(await fs.readFile(path.join(base, e, 'package.json'), 'utf8')) as PkgJson;
+        if (typeof pj.name === 'string') names.add(pj.name);
+      } catch { /* skip */ }
+    }
+  }
+  return names;
+}
+
+async function gatherFiles(root: string): Promise<Array<{ path: string; content: string }>> {
+  const out: Array<{ path: string; content: string }> = [];
+  let truncated = false;
+
+  const readCapped = async (abs: string) => {
+    if (out.length >= MAX_FILES) { truncated = true; return; }
+    try {
+      const st = await fs.stat(abs);
+      if (st.size > MAX_FILE_BYTES) return;
+      out.push({ path: path.relative(root, abs), content: await fs.readFile(abs, 'utf8') });
+    } catch { /* unreadable */ }
+  };
+
+  const walk = async (dir: string) => {
+    let entries: import('fs').Dirent[];
+    try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (out.length >= MAX_FILES) { truncated = true; return; }
+      const abs = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (!SKIP_DIRS.has(e.name)) await walk(abs);
+      } else if (e.isFile() && SRC_EXTS.has(path.extname(e.name))) {
+        await readCapped(abs);
+      }
+    }
+  };
+
+  try {
+    for (const e of await fs.readdir(root, { withFileTypes: true })) {
+      if (e.isFile() && SRC_EXTS.has(path.extname(e.name))) await readCapped(path.join(root, e.name));
+    }
+  } catch { /* unreadable root */ }
+  for (const d of SRC_DIRS) {
+    const abs = path.join(root, d);
+    if (await exists(abs)) await walk(abs);
+  }
+  if (truncated) logger.warn('security', 'dependency_health_truncated', `File cap hit scanning ${root}`);
+  return out;
+}
+
+async function readInstalledVersion(root: string, pkg: string): Promise<string | undefined> {
+  try {
+    const pj = JSON.parse(await fs.readFile(path.join(root, 'node_modules', pkg, 'package.json'), 'utf8')) as PkgJson;
+    return typeof pj.version === 'string' ? pj.version : undefined;
+  } catch { return undefined; }
+}
+
+function toFinding(pf: PhantomFinding, version: string | undefined, pm: PackageManager): Finding {
+  const target = pf.buildPath ? 'dependencies' : 'devDependencies';
+  const verSuffix = version ? `@${version}` : '';
+  const devFlag = pf.buildPath ? '' : pm === 'yarn' ? ' --dev' : ' -D';
+  const verb = pm === 'pnpm' ? 'pnpm add' : pm === 'yarn' ? 'yarn add' : 'npm install';
+  const why = pf.inOverrides ? 'present only as an overrides/resolutions version pin' : 'resolved only transitively';
+  const risk = pm === 'pnpm'
+    ? "pnpm's strict layout makes it unreachable from source — clean installs (e.g. Vercel) fail with \"module not found\""
+    : 'npm flat-hoisting resolves it today, but it breaks on a pnpm migration or any transitive change';
+  return {
+    type: 'config',
+    dedupKey: '',
+    sources: ['dependency-health'],
+    title: `Undeclared dependency: ${pf.pkg}`,
+    detail: `${pf.pkg} is imported in source (${pf.importSites.join(', ')}) but not declared in package.json — ${why}. ${risk}.`,
+    package: pf.pkg,
+    version,
+    path: 'package.json',
+    severity: pf.severity,
+    advisoryIds: [],
+    rawBySource: {
+      'dependency-health': {
+        pkg: pf.pkg,
+        importSites: pf.importSites,
+        inOverrides: pf.inOverrides,
+        buildPath: pf.buildPath,
+        packageManager: pm,
+      },
+    },
+    references: [],
+    remediation: {
+      source: 'dependency-health',
+      relationship: 'direct',
+      recommendedAction: `Declare ${pf.pkg} in ${target}${version ? ` (e.g. ^${version})` : ''}`,
+      runnableFixCommand: `${verb}${devFlag} ${pf.pkg}${verSuffix}`,
+    },
+    reachable: null,
+  };
+}
+
+async function scan(project: ProjectConfig): Promise<Finding[]> {
+  const root = project.path;
+  let pkg: PkgJson;
+  try {
+    pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8')) as PkgJson;
+  } catch {
+    return [];
+  }
+  const declared = new Set<string>([
+    ...Object.keys(pkg.dependencies ?? {}),
+    ...Object.keys(pkg.devDependencies ?? {}),
+    ...Object.keys(pkg.peerDependencies ?? {}),
+    ...Object.keys(pkg.optionalDependencies ?? {}),
+  ]);
+  const overrides = new Set<string>([
+    ...Object.keys(pkg.overrides ?? {}),
+    ...Object.keys(pkg.pnpm?.overrides ?? {}),
+    ...Object.keys(pkg.resolutions ?? {}),
+  ]);
+  const packageManager = await resolvePM(pkg, root);
+  const workspaceNames = await resolveWorkspaceNames(pkg, root);
+  const files = await gatherFiles(root);
+  const phantoms = detectPhantomDeps({ declared, overrides, packageManager, workspaceNames, files });
+
+  const findings: Finding[] = [];
+  for (const pf of phantoms) {
+    const version = await readInstalledVersion(root, pf.pkg);
+    findings.push(toFinding(pf, version, packageManager));
+  }
+  return findings;
+}
+
+export const DependencyHealthSource: ScanSource = {
+  id: 'dependency-health',
+  displayName: 'Dependency Health',
+  findingTypes: ['config'],
+  timeoutMs: 30_000,
+  isAvailable: async () => true,
+  scan,
+};

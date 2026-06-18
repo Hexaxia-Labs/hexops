@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { collectValueImports, rootPkg, stripComments, detectPhantomDeps, type PhantomScanInput } from './dependency-health';
+import { DependencyHealthSource } from './dependency-health';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 describe('rootPkg', () => {
   it('reduces scoped subpaths to scope/name', () => {
@@ -114,5 +118,49 @@ describe('detectPhantomDeps', () => {
     expect(out).toEqual([
       { pkg: 'dup', importSites: ['scripts/a.ts', 'src/b.ts'], inOverrides: false, buildPath: true, severity: 'high' },
     ]);
+  });
+});
+
+describe('DependencyHealthSource.scan', () => {
+  it('emits a HIGH config finding for a pnpm override-only build-path phantom', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dh-'));
+    try {
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({
+        packageManager: 'pnpm@10.0.0',
+        dependencies: { 'gray-matter': '^4.0.3' },
+        pnpm: { overrides: { 'js-yaml': '4.2.0' } },
+      }));
+      mkdirSync(join(dir, 'src', 'lib'), { recursive: true });
+      writeFileSync(join(dir, 'src', 'lib', 'yaml-engine.ts'), "import yaml from 'js-yaml';\n");
+
+      const findings = await DependencyHealthSource.scan({ id: 'p', name: 'p', path: dir } as never);
+      expect(findings).toHaveLength(1);
+      const f = findings[0];
+      expect(f).toMatchObject({
+        type: 'config',
+        title: 'Undeclared dependency: js-yaml',
+        package: 'js-yaml',
+        path: 'package.json',
+        severity: 'high',
+        sources: ['dependency-health'],
+      });
+      expect(f.remediation?.recommendedAction).toContain('dependencies');
+      expect(f.remediation?.runnableFixCommand).toContain('js-yaml');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns [] when package.json is absent', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dh-empty-'));
+    try {
+      expect(await DependencyHealthSource.scan({ id: 'p', name: 'p', path: dir } as never)).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('isAvailable is always true', async () => {
+    expect(await DependencyHealthSource.isAvailable()).toBe(true);
   });
 });
