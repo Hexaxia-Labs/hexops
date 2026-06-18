@@ -43,7 +43,7 @@
     "recharts": "^3.8.1",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.6.0",
-    "ws": "^8.20.1"
+    "ws": "^8.21.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -53,10 +53,11 @@
     "overrides": {
       "postcss": "^8.5.15",
       "ip-address": "^10.2.0",
-      "vite": "^8.0.13",
-      "esbuild": ">=0.28.0",
+      "vite": "^8.0.16",
+      "esbuild": ">=0.28.1",
       "qs": ">=6.15.2",
-      "hono": ">=4.12.21"
+      "hono": ">=4.12.25",
+      "ws": ">=8.21.0"
     }
   },
   "devDependencies": {
