@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { collectValueImports, rootPkg, stripComments } from './dependency-health';
-import { detectPhantomDeps, type PhantomScanInput } from './dependency-health';
+import { collectValueImports, rootPkg, stripComments, detectPhantomDeps, type PhantomScanInput } from './dependency-health';
 
 describe('rootPkg', () => {
   it('reduces scoped subpaths to scope/name', () => {
