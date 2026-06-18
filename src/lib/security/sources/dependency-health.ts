@@ -62,3 +62,47 @@ export function collectValueImports(content: string): Set<string> {
   while ((m = RE_REQUIRE.exec(src))) consider(m[1]);
   return found;
 }
+
+export type PackageManager = 'pnpm' | 'npm' | 'yarn' | 'unknown';
+
+export interface PhantomScanInput {
+  declared: Set<string>;
+  overrides: Set<string>;
+  packageManager: PackageManager;
+  workspaceNames: Set<string>;
+  files: Array<{ path: string; content: string }>;
+}
+
+export interface PhantomFinding {
+  pkg: string;
+  importSites: string[];
+  inOverrides: boolean;
+  buildPath: boolean;
+  severity: 'high' | 'low';
+}
+
+function isScriptPath(p: string): boolean {
+  const norm = p.replace(/\\/g, '/');
+  return /(^|\/)(scripts|test|tests|__tests__|__mocks__)\//.test(norm)
+    || /\.(test|spec)\.[cm]?[jt]sx?$/.test(norm);
+}
+
+export function detectPhantomDeps(input: PhantomScanInput): PhantomFinding[] {
+  const { declared, overrides, packageManager, workspaceNames, files } = input;
+  const sites = new Map<string, Set<string>>();
+  for (const file of files) {
+    for (const root of collectValueImports(file.content)) {
+      if (declared.has(root) || workspaceNames.has(root)) continue;
+      if (!sites.has(root)) sites.set(root, new Set());
+      sites.get(root)!.add(file.path);
+    }
+  }
+  const findings: PhantomFinding[] = [];
+  for (const [pkg, siteSet] of sites) {
+    const importSites = Array.from(siteSet).sort();
+    const buildPath = importSites.some((p) => !isScriptPath(p));
+    const severity: 'high' | 'low' = packageManager === 'pnpm' && buildPath ? 'high' : 'low';
+    findings.push({ pkg, importSites, inOverrides: overrides.has(pkg), buildPath, severity });
+  }
+  return findings.sort((a, b) => a.pkg.localeCompare(b.pkg));
+}
