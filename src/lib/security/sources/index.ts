@@ -2,5 +2,6 @@ import type { ScanSource } from '../types';
 import { PnpmAuditSource } from './pnpm-audit';
 import { GrypeSource } from './grype';
 import { CveLiteSource } from './cve-lite';
+import { DependencyHealthSource } from './dependency-health';
 
-export const SOURCES: ScanSource[] = [PnpmAuditSource, GrypeSource, CveLiteSource];
+export const SOURCES: ScanSource[] = [PnpmAuditSource, GrypeSource, CveLiteSource, DependencyHealthSource];

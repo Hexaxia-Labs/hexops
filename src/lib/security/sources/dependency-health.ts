@@ -56,16 +56,15 @@ export function collectValueImports(content: string): Set<string> {
     if (BUILTINS.has(root)) return;
     found.add(root);
   };
-  let m: RegExpExecArray | null;
   RE_FROM.lastIndex = 0;
-  while ((m = RE_FROM.exec(src))) {
+  for (let m = RE_FROM.exec(src); m !== null; m = RE_FROM.exec(src)) {
     if (isTypeOnlyImport(m[0], m[1] ?? '')) continue;
     consider(m[2]);
   }
   RE_SIDE.lastIndex = 0;
-  while ((m = RE_SIDE.exec(src))) consider(m[1]);
+  for (let m = RE_SIDE.exec(src); m !== null; m = RE_SIDE.exec(src)) consider(m[1]);
   RE_REQUIRE.lastIndex = 0;
-  while ((m = RE_REQUIRE.exec(src))) consider(m[1]);
+  for (let m = RE_REQUIRE.exec(src); m !== null; m = RE_REQUIRE.exec(src)) consider(m[1]);
   return found;
 }
 
@@ -100,7 +99,7 @@ export function detectPhantomDeps(input: PhantomScanInput): PhantomFinding[] {
     for (const root of collectValueImports(file.content)) {
       if (declared.has(root) || workspaceNames.has(root)) continue;
       if (!sites.has(root)) sites.set(root, new Set());
-      sites.get(root)!.add(file.path);
+      sites.get(root)?.add(file.path);
     }
   }
   const findings: PhantomFinding[] = [];
