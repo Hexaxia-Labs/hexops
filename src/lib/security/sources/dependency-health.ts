@@ -13,6 +13,7 @@ const BUILTINS = new Set([
   'trace_events', 'tty', 'url', 'util', 'v8', 'vm', 'wasi', 'worker_threads', 'zlib', 'test',
 ]);
 
+// NOTE: requires whitespace before the binding; minified `import{x}from'p'` is not matched — acceptable, minified code lives in dist/node_modules (both in SKIP_DIRS).
 const RE_FROM = /(?:import|export)\s+(?:type\s+)?([^'";]*?)\s+from\s*['"]([^'"]+)['"]/g;
 const RE_SIDE = /(?:^|[;{}])\s*import\s*['"]([^'"]+)['"]/g;
 const RE_REQUIRE = /\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g;

@@ -1,12 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { collectValueImports, rootPkg, stripComments, detectPhantomDeps, type PhantomScanInput } from './dependency-health';
 import { DependencyHealthSource } from './dependency-health';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { promises as fs } from 'node:fs';
-import { tmpdir } from 'node:os';
-import os from 'node:os';
-import { join } from 'node:path';
-import path from 'node:path';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, promises as fs } from 'node:fs';
+import { tmpdir, default as os } from 'node:os';
+import { join, default as path } from 'node:path';
 
 describe('rootPkg', () => {
   it('reduces scoped subpaths to scope/name', () => {
