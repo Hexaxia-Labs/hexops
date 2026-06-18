@@ -113,7 +113,8 @@ export function detectPhantomDeps(input: PhantomScanInput): PhantomFinding[] {
 }
 
 const SRC_DIRS = ['src', 'app', 'pages', 'lib', 'components', 'server', 'config', 'scripts'];
-const SKIP_DIRS = new Set(['node_modules', '.next', '.git', 'dist', 'build', 'out', 'coverage', '.turbo', '.vercel', '.pnpm']);
+const SKIP_DIRS = new Set(['node_modules', '.next', '.git', 'dist', 'build', 'out', 'coverage', '.turbo', '.vercel', '.pnpm', '__tests__', '__mocks__']);
+const TEST_FILE = /\.(test|spec)\.[cm]?[jt]sx?$/;
 const SRC_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts']);
 const MAX_FILE_BYTES = 512 * 1024;
 const MAX_FILES = 5000;
@@ -170,6 +171,7 @@ async function gatherFiles(root: string): Promise<Array<{ path: string; content:
 
   const readCapped = async (abs: string) => {
     if (out.length >= MAX_FILES) { truncated = true; return; }
+    if (TEST_FILE.test(abs)) return;
     try {
       const st = await fs.stat(abs);
       if (st.size > MAX_FILE_BYTES) return;

@@ -2,8 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { collectValueImports, rootPkg, stripComments, detectPhantomDeps, type PhantomScanInput } from './dependency-health';
 import { DependencyHealthSource } from './dependency-health';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
+import os from 'node:os';
 import { join } from 'node:path';
+import path from 'node:path';
 
 describe('rootPkg', () => {
   it('reduces scoped subpaths to scope/name', () => {
@@ -162,5 +165,36 @@ describe('DependencyHealthSource.scan', () => {
 
   it('isAvailable is always true', async () => {
     expect(await DependencyHealthSource.isAvailable()).toBe(true);
+  });
+
+  it("excludes test/spec files and includes scripts/", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "dhs-test-excl-"));
+    try {
+      // package.json — no deps, no devDeps (both packages are phantom)
+      await fs.writeFile(
+        path.join(tmpDir, "package.json"),
+        JSON.stringify({ name: "test-excl", packageManager: "pnpm@9.0.0", dependencies: {} })
+      );
+      // test file that imports fixture-only-pkg
+      await fs.mkdir(path.join(tmpDir, "src"), { recursive: true });
+      await fs.writeFile(
+        path.join(tmpDir, "src", "app.test.ts"),
+        "import x from 'fixture-only-pkg';\n"
+      );
+      // scripts/ file that imports real-script-pkg
+      await fs.mkdir(path.join(tmpDir, "scripts"), { recursive: true });
+      await fs.writeFile(
+        path.join(tmpDir, "scripts", "real.ts"),
+        "import y from 'real-script-pkg';\n"
+      );
+
+      const findings = await DependencyHealthSource.scan({ id: 'p', name: 'p', path: tmpDir } as never);
+
+      const names = findings.map((f) => f.package as string);
+      expect(names).not.toContain("fixture-only-pkg");
+      expect(names).toContain("real-script-pkg");
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
   });
 });
