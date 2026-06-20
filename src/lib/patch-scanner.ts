@@ -28,7 +28,11 @@ import { getAllEscalations, resolveEscalation } from './escalation-store';
 import { readSecurityCache } from './security/persistence';
 
 const execAsync = promisify(exec);
-const OUTDATED_TIMEOUT_MS = 10_000;
+// `pnpm outdated` queries the registry per dependency and is far slower than
+// `npm outdated` (~8s warm vs ~1s); 10s timed it out under registry latency,
+// silently returning [] and under-reporting pnpm projects. Give pnpm headroom.
+const OUTDATED_TIMEOUT_MS = 20_000;
+const PNPM_OUTDATED_TIMEOUT_MS = 60_000;
 
 /**
  * Resolve the installed version of a package by checking the paths npm audit
@@ -255,14 +259,15 @@ export async function scanOutdated(
       ? 'npm outdated --json'
       : 'yarn outdated --json';
 
+    const timeoutMs = pm === 'pnpm' ? PNPM_OUTDATED_TIMEOUT_MS : OUTDATED_TIMEOUT_MS;
     try {
-      const { stdout } = await execAsync(cmd, { cwd: project.path, timeout: OUTDATED_TIMEOUT_MS });
+      const { stdout } = await execAsync(cmd, { cwd: project.path, timeout: timeoutMs });
       output = stdout;
     } catch (err: unknown) {
       // These commands exit non-zero when outdated packages exist, or may timeout
       const execErr = err as { stdout?: string; killed?: boolean };
       if (execErr.killed) {
-        console.warn(`Timeout scanning outdated for ${project.id}`);
+        console.warn(`Timeout scanning outdated for ${project.id} (${pm}, ${timeoutMs}ms) - results may be incomplete`);
         return [];
       }
       output = execErr.stdout || '{}';
@@ -271,63 +276,64 @@ export async function scanOutdated(
     // pnpm/npm may output warnings before JSON - extract only the JSON portion
     const jsonStart = output.search(/[\[{]/);
     const jsonOutput = jsonStart >= 0 ? output.slice(jsonStart) : '{}';
-    const data = JSON.parse(jsonOutput);
-    const result: OutdatedPackage[] = [];
-
-    // pnpm format (array)
-    if (Array.isArray(data)) {
-      for (const pkg of data) {
-        result.push({
-          name: pkg.name,
-          current: pkg.current,
-          wanted: pkg.wanted,
-          latest: pkg.latest,
-          type: pkg.dependencyType === 'devDependencies' ? 'devDependencies' : 'dependencies',
-        });
-      }
-    }
-    // npm format (object, or object with arrays for workspaces)
-    else if (typeof data === 'object') {
-      for (const [name, info] of Object.entries(data)) {
-        // npm workspaces return an array of entries for each package
-        // (one per workspace that has the dependency)
-        if (Array.isArray(info)) {
-          // Use the first entry - versions should be consistent across workspaces
-          const first = info[0] as { current: string; wanted: string; latest: string; type?: string };
-          if (first) {
-            result.push({
-              name,
-              current: first.current,
-              wanted: first.wanted,
-              latest: first.latest,
-              type: first.type === 'devDependencies' ? 'devDependencies' : 'dependencies',
-            });
-          }
-        } else {
-          // Standard npm format (single object per package)
-          const pkg = info as { current: string; wanted: string; latest: string; type?: string };
-          result.push({
-            name,
-            current: pkg.current,
-            wanted: pkg.wanted,
-            latest: pkg.latest,
-            type: pkg.type === 'devDependencies' ? 'devDependencies' : 'dependencies',
-          });
-        }
-      }
-    }
-
-    // Filter out packages where current version already matches latest
-    // (can happen with workspace edge cases or lock file mismatches)
-    return result.filter(pkg => {
-      const current = pkg.current?.replace(/^[\^~]/, '');
-      const latest = pkg.latest?.replace(/^[\^~]/, '');
-      return current !== latest;
-    });
+    return parseOutdatedData(JSON.parse(jsonOutput));
   } catch (error) {
     console.error(`Failed to scan outdated for ${project.id}:`, error);
     return [];
   }
+}
+
+type OutdatedEntry = {
+  current?: string;
+  wanted?: string;
+  latest?: string;
+  /** npm field */
+  type?: string;
+  /** pnpm field */
+  dependencyType?: string;
+  name?: string;
+};
+
+/**
+ * Parse the JSON from `npm`/`pnpm`/`yarn outdated` into OutdatedPackage[].
+ *
+ * Shapes handled:
+ *  - npm:  object keyed by name `{ pkg: {current,wanted,latest,type} }`
+ *          (workspaces yield an array of entries per name)
+ *  - pnpm: `--format json` is also an object, but uses `dependencyType` rather
+ *          than npm's `type`. The old code only read `type`, so pnpm dev deps
+ *          were silently mislabeled as prod deps.
+ *  - legacy array form is still accepted defensively.
+ */
+export function parseOutdatedData(data: unknown): OutdatedPackage[] {
+  const result: OutdatedPackage[] = [];
+  const toType = (e: OutdatedEntry): 'dependencies' | 'devDependencies' =>
+    (e.type ?? e.dependencyType) === 'devDependencies' ? 'devDependencies' : 'dependencies';
+  const add = (name: string, e: OutdatedEntry) => {
+    result.push({ name, current: e.current!, wanted: e.wanted!, latest: e.latest!, type: toType(e) });
+  };
+
+  if (Array.isArray(data)) {
+    for (const pkg of data as OutdatedEntry[]) {
+      if (pkg?.name) add(pkg.name, pkg);
+    }
+  } else if (data && typeof data === 'object') {
+    for (const [name, info] of Object.entries(data as Record<string, unknown>)) {
+      if (Array.isArray(info)) {
+        const first = info[0] as OutdatedEntry | undefined;
+        if (first) add(name, first);
+      } else if (info && typeof info === 'object') {
+        add(name, info as OutdatedEntry);
+      }
+    }
+  }
+
+  // Drop entries where current already equals latest (workspace / lockfile edge cases)
+  return result.filter(pkg => {
+    const current = pkg.current?.replace(/^[\^~]/, '');
+    const latest = pkg.latest?.replace(/^[\^~]/, '');
+    return current !== latest;
+  });
 }
 
 /**
