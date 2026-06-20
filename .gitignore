@@ -49,6 +49,11 @@ hexops.config.json
 .claude/
 .pnpm-approved-builds
 
+# cve-lite scan artifacts
+/cve-report/
+cve-lite-scan-*.json
+cve-lite-debug-*.log
+
 # Private documentation
 docs/dev-notes.md
 docs/plans/
