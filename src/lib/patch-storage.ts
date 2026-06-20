@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync } from 'fs';
+import { createHash } from 'crypto';
 import { join } from 'path';
 import type {
   PatchState,
@@ -20,7 +21,30 @@ const CACHE_TTL_BASE_MS = 60 * 60 * 1000;
 const CACHE_TTL_JITTER_MS = 15 * 60 * 1000;
 
 // Bump when the cache schema changes to force automatic invalidation of old entries
-const CACHE_SCHEMA_VERSION = 2;
+const CACHE_SCHEMA_VERSION = 3;
+
+// Lockfiles fingerprinted (alongside package.json) to detect out-of-band dep changes
+const LOCKFILES = ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lockb'];
+
+/**
+ * Fingerprint a project's dependency state from package.json + its lockfile(s).
+ * Lets the scan cache invalidate when deps change OUT OF BAND (manual edits, CLI
+ * bumps, dependabot, git pull) rather than only on hexops's own apply-patch paths.
+ * Returns null if package.json can't be read (caller then falls back to TTL only).
+ */
+export function computeDepsFingerprint(projectPath: string): string | null {
+  try {
+    const hash = createHash('sha1');
+    hash.update(readFileSync(join(projectPath, 'package.json')));
+    for (const lf of LOCKFILES) {
+      const p = join(projectPath, lf);
+      if (existsSync(p)) hash.update(readFileSync(p));
+    }
+    return hash.digest('hex');
+  } catch {
+    return null;
+  }
+}
 
 function getCacheTTL(): number {
   return CACHE_TTL_BASE_MS + Math.floor(Math.random() * CACHE_TTL_JITTER_MS);
@@ -185,7 +209,7 @@ function getCacheFilePath(projectId: string): string {
 /**
  * Read project cache (returns null if expired, missing, or wrong schema version)
  */
-export function readProjectCache(projectId: string): ProjectPatchCache | null {
+export function readProjectCache(projectId: string, projectPath?: string): ProjectPatchCache | null {
   ensurePatchStorageDir();
   const cacheFile = getCacheFilePath(projectId);
   if (!existsSync(cacheFile)) {
@@ -201,6 +225,14 @@ export function readProjectCache(projectId: string): ProjectPatchCache | null {
     // Check if expired
     if (new Date(cache.expiresAt) < new Date()) {
       return null;
+    }
+    // Content-aware invalidation: even within its TTL, the cache is stale if the
+    // project's deps changed out of band since it was written.
+    if (projectPath && cache.depsFingerprint) {
+      const current = computeDepsFingerprint(projectPath);
+      if (current && current !== cache.depsFingerprint) {
+        return null;
+      }
     }
     return cache;
   } catch {
@@ -228,9 +260,11 @@ export function createProjectCache(
   projectId: string,
   outdated: ProjectPatchCache['outdated'],
   vulnerabilities: ProjectPatchCache['vulnerabilities'],
-  activeOverrides?: ActiveOverride[]
+  activeOverrides?: ActiveOverride[],
+  projectPath?: string
 ): ProjectPatchCache {
   const now = new Date();
+  const depsFingerprint = projectPath ? computeDepsFingerprint(projectPath) : null;
   return {
     projectId,
     timestamp: now.toISOString(),
@@ -238,6 +272,7 @@ export function createProjectCache(
     outdated,
     vulnerabilities,
     ...(activeOverrides && activeOverrides.length > 0 ? { activeOverrides } : {}),
+    ...(depsFingerprint ? { depsFingerprint } : {}),
     schemaVersion: CACHE_SCHEMA_VERSION,
   } as ProjectPatchCache;
 }

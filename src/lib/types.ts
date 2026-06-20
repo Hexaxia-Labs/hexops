@@ -376,5 +376,7 @@ export interface ProjectPatchCache {
   outdated: OutdatedPackage[];
   vulnerabilities: VulnerabilityInfo[];
   activeOverrides?: ActiveOverride[];
+  /** sha1 of package.json + lockfile(s); invalidates the cache on out-of-band dep changes */
+  depsFingerprint?: string;
   schemaVersion?: number;
 }

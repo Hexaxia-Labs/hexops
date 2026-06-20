@@ -596,7 +596,7 @@ export async function scanProject(
 ): Promise<ProjectPatchCache> {
   // Check cache first
   if (!forceRefresh) {
-    const cached = readProjectCache(project.id);
+    const cached = readProjectCache(project.id, project.path);
     if (cached) return cached;
   }
 
@@ -643,7 +643,7 @@ export async function scanProject(
   const activeOverrides = readActiveOverrides(project.path, pm, vulnNames);
 
   // Create and save cache
-  const cache = createProjectCache(project.id, annotatedOutdated, annotatedVulnerabilities, activeOverrides);
+  const cache = createProjectCache(project.id, annotatedOutdated, annotatedVulnerabilities, activeOverrides, project.path);
   writeProjectCache(cache);
 
   // Update aggregate state
