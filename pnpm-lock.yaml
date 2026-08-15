@@ -120,8 +120,8 @@ importers:
         specifier: ^4.1.10
         version: 4.1.10(vitest@4.1.10)
       cve-lite-cli:
-        specifier: 1.29.0
-        version: 1.29.0
+        specifier: github:alamb-hex/cve-lite-cli-1.29.1#fix/compound-semver-ranges
+        version: https://codeload.github.com/alamb-hex/cve-lite-cli-1.29.1/tar.gz/7e5bcb9d219fc5f40365b51cdce84e450789b085
       tailwindcss:
         specifier: 4.3.3
         version: 4.3.3
@@ -1765,8 +1765,9 @@ packages:
   csstype@3.2.3:
     resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
 
-  cve-lite-cli@1.29.0:
-    resolution: {integrity: sha512-8ePDxSTKTjLI2xKBKAqndqb+HJ4PXAg3WwJtQbdcHl+kg1lS9Tl5kf0BSDOuoUdmn8sxGpmGBnFMPN/tAWXTbA==}
+  cve-lite-cli@https://codeload.github.com/alamb-hex/cve-lite-cli-1.29.1/tar.gz/7e5bcb9d219fc5f40365b51cdce84e450789b085:
+    resolution: {gitHosted: true, integrity: sha512-sZqfDBuD0yNGYVmX/yZp4uOHR9WEc46P7eOJKUucIdy8KfLngfusnbyAm+ZBoP9h3df1gpmEnAAn5BKKvjky+g==, tarball: https://codeload.github.com/alamb-hex/cve-lite-cli-1.29.1/tar.gz/7e5bcb9d219fc5f40365b51cdce84e450789b085}
+    version: 1.29.1
     engines: {node: '>=18'}
     hasBin: true
 
@@ -4321,7 +4322,7 @@ snapshots:
 
   csstype@3.2.3: {}
 
-  cve-lite-cli@1.29.0:
+  cve-lite-cli@https://codeload.github.com/alamb-hex/cve-lite-cli-1.29.1/tar.gz/7e5bcb9d219fc5f40365b51cdce84e450789b085:
     dependencies:
       better-sqlite3: 12.11.1
       fflate: 0.8.3
