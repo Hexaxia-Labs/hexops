@@ -493,6 +493,8 @@ export function ProjectSecurityAccordion({
     previousCount: number;
     currentCount: number;
     error?: string;
+    /** Package-manager output behind a failure, shown verbatim in the dialog (#141). */
+    installLogTail?: string;
   } | undefined>(undefined);
   const [remediationAttemptId, setRemediationAttemptId] = useState<string | undefined>(undefined);
   const [referencesFor, setReferencesFor] = useState<PackageGroup | null>(null);
@@ -971,6 +973,11 @@ export function ProjectSecurityAccordion({
     setRemediationBusy(true);
     setRemediationOutcome(undefined);
 
+    // Diagnostic detail pulled off a failed response body (e.g. the package
+    // manager output behind a lockfile-resolution failure). Held outside the
+    // try so the catch can surface it alongside the thrown message (#141).
+    let failureLog: string | undefined;
+
     try {
       // Phase: installing
       setRemediationPhase('installing');
@@ -993,8 +1000,21 @@ export function ProjectSecurityAccordion({
         }),
       });
       if (!installRes.ok) {
-        const e = await installRes.json().catch(() => ({}));
-        throw new Error((e as { error?: string }).error ?? `update failed (HTTP ${installRes.status})`);
+        const e = await installRes.json().catch(() => ({})) as {
+          error?: string;
+          resolution?: { actions?: string[]; error?: string };
+        };
+        // The top-level `error` is only a wrapper ("Lockfile resolution (mode)
+        // failed"); the actual package-manager output lives in resolution.actions.
+        // Without this the dialog shows the same opaque line for every cause (#141).
+        const lines = e.resolution?.actions ?? [];
+        const trailing = e.resolution?.error;
+        const detail = [
+          ...lines,
+          ...(trailing && !lines.some(l => l.includes(trailing)) ? [`Error: ${trailing}`] : []),
+        ];
+        if (detail.length > 0) failureLog = detail.join('\n');
+        throw new Error(e.error ?? `update failed (HTTP ${installRes.status})`);
       }
 
       // Phase: rescanning — full 3-source scan to refresh the merged cache
@@ -1068,7 +1088,12 @@ export function ProjectSecurityAccordion({
       onAnyDataChanged?.();
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'remediation failed';
-      setRemediationOutcome({ previousCount, currentCount: previousCount, error: msg });
+      setRemediationOutcome({
+        previousCount,
+        currentCount: previousCount,
+        error: msg,
+        installLogTail: failureLog,
+      });
       setRemediationPhase('error');
 
       // Change-control: report failure outcome (fire-and-forget)

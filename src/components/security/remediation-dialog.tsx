@@ -150,12 +150,17 @@ export function RemediationDialog({
 
   // ─── Helpers ───────────────────────────────────────────────────────────────
 
-  function renderInstallLogTail() {
+  function renderInstallLogTail(label?: string) {
     if (!outcome?.installLogTail) return null;
     return (
-      <pre className="mt-3 text-[0.7rem] font-mono text-zinc-400 bg-zinc-900 border border-zinc-800 rounded px-2 py-2 max-h-32 overflow-auto whitespace-pre-wrap">
-        {outcome.installLogTail}
-      </pre>
+      <div className="mt-3">
+        {label && (
+          <p className="text-[0.7rem] uppercase tracking-wide text-zinc-500 mb-1">{label}</p>
+        )}
+        <pre className="text-[0.7rem] font-mono text-zinc-400 bg-zinc-900 border border-zinc-800 rounded px-2 py-2 max-h-48 overflow-auto whitespace-pre-wrap">
+          {outcome.installLogTail}
+        </pre>
+      </div>
     );
   }
 
@@ -310,7 +315,7 @@ export function RemediationDialog({
                 {outcome.error}
               </div>
             )}
-            {renderInstallLogTail()}
+            {renderInstallLogTail('What the package manager reported')}
             {renderTrackingId()}
           </div>
           <div className="flex justify-end gap-2 border-t border-zinc-800 px-5 py-3">

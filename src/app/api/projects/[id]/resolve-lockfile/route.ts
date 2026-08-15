@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getProject } from '@/lib/config';
 import { resolveLockfile } from '@/lib/lockfile-resolver';
+import { buildProjectEnv } from '@/lib/project-env';
 import { getGlobalSettings, getProjectSettings } from '@/lib/settings';
 import type { LockfileResolutionMode } from '@/lib/types';
 
@@ -26,7 +27,7 @@ export async function POST(
       : projectSettings.patching?.lockfileResolution as LockfileResolutionMode) ??
     'clean-slate';
 
-  const result = await resolveLockfile(project.path, mode);
+  const result = await resolveLockfile(project.path, mode, buildProjectEnv(id, project.path));
 
   return NextResponse.json({
     projectId: id,

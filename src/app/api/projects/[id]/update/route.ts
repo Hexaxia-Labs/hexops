@@ -19,6 +19,7 @@ import { buildYarnUpdateCmd } from '@/lib/updaters/yarn';
 import { applyOverrides, removeOverrideConflicts, cleanStaleOverrides, findAllInstalledVersions, pickLowestVersion } from '@/lib/updaters/override';
 import { installPackages } from '@/lib/updaters/install';
 import { execAsync } from '@/lib/updaters/common';
+import { buildProjectEnv, projectProcessEnv } from '@/lib/project-env';
 import { SECURITY_PLUGINS } from '@/lib/security/plugins';
 import { isPluginEnabledForProject } from '@/lib/security/plugins/config';
 import { AUTO_APPLY_ENABLED } from '@/lib/auto-apply-flag';
@@ -80,7 +81,9 @@ export async function POST(
         : projectSettings.patching?.lockfileResolution as LockfileResolutionMode) ??
       'clean-slate';
 
-    const resolution = await resolveLockfile(cwd, resolutionMode);
+    const projectEnv = projectProcessEnv(id, cwd);
+
+    const resolution = await resolveLockfile(cwd, resolutionMode, buildProjectEnv(id, cwd));
     if (!resolution.success) {
       return { status: 500, body: { success: false, error: `Lockfile resolution (${resolutionMode}) failed`, resolution } };
     }
@@ -270,7 +273,7 @@ export async function POST(
           const wrapped = await plugin.wrapInstall({
             project,
             command: [packageManager],
-            env: process.env,
+            env: projectEnv,
           });
           if (wrapped.command[0] && wrapped.command[0] !== packageManager) {
             installBinOverride = wrapped.command[0];
@@ -291,7 +294,7 @@ export async function POST(
         : buildYarnUpdateCmd(isWorkspaceProject);
 
       try {
-        const { stdout, stderr } = await execAsync(cmd, { cwd, timeout: 180000 });
+        const { stdout, stderr } = await execAsync(cmd, { cwd, timeout: 180000, env: projectEnv });
         results.push({ package: '*', success: true, output: stdout + (stderr ? `\n${stderr}` : '') });
       } catch (err) {
         const e = err as { stdout?: string; stderr?: string; message?: string };
@@ -309,7 +312,7 @@ export async function POST(
           : packageManager === 'npm'
           ? 'npm install --legacy-peer-deps'
           : 'yarn install';
-        await execAsync(reconcileCmd, { cwd, timeout: NPM_INSTALL_TIMEOUT });
+        await execAsync(reconcileCmd, { cwd, timeout: NPM_INSTALL_TIMEOUT, env: projectEnv });
       } catch { /* non-fatal */ }
 
       cleanStaleOverrides(cwd, packageManager, id);

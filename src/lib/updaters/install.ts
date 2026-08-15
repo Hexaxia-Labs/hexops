@@ -7,6 +7,7 @@ import { buildYarnInstallCmd } from './yarn';
 import { addPatchHistoryEntry, generatePatchId } from '@/lib/patch-storage';
 import { getUpdateType } from '@/lib/patch-scanner';
 import { logger } from '@/lib/logger';
+import { projectProcessEnv } from '@/lib/project-env';
 
 function buildBatchCmd(packageManager: string, specs: string[], isWorkspace: boolean): string {
   if (packageManager === 'pnpm') return buildPnpmInstallCmd(specs, isWorkspace);
@@ -52,6 +53,9 @@ export async function installPackages(
   installBinOverride?: string,
 ): Promise<UpdateResult[]> {
   const results: UpdateResult[] = [];
+  // Registry credentials for private scopes live in project settings / .env,
+  // not in the hexops server's own environment (#142).
+  const env = projectProcessEnv(projectId, cwd);
   const pkgSpecs = directPkgs.map(p => `${p.name}@${p.targetVersion}`);
   const batchCmd = applyBinOverride(buildBatchCmd(packageManager, pkgSpecs, isWorkspace), installBinOverride);
 
@@ -60,7 +64,7 @@ export async function installPackages(
   let batchStderr = '';
 
   try {
-    const result = await execAsync(batchCmd, { cwd, timeout: NPM_INSTALL_TIMEOUT });
+    const result = await execAsync(batchCmd, { cwd, timeout: NPM_INSTALL_TIMEOUT, env });
     batchStdout = result.stdout || '';
     batchStderr = result.stderr || '';
     batchSuccess = true;
@@ -81,7 +85,7 @@ export async function installPackages(
       const cleaned = await cleanNodeModules(cwd);
       if (cleaned) {
         try {
-          const retryResult = await execAsync(batchCmd, { cwd, timeout: NPM_INSTALL_TIMEOUT });
+          const retryResult = await execAsync(batchCmd, { cwd, timeout: NPM_INSTALL_TIMEOUT, env });
           batchStdout = retryResult.stdout || '';
           batchStderr = retryResult.stderr || '';
           batchSuccess = true;
@@ -107,7 +111,7 @@ export async function installPackages(
       const repaired = await repairPnpmLockfile(cwd);
       if (repaired) {
         try {
-          const retryResult = await execAsync(batchCmd, { cwd, timeout: NPM_INSTALL_TIMEOUT });
+          const retryResult = await execAsync(batchCmd, { cwd, timeout: NPM_INSTALL_TIMEOUT, env });
           batchStdout = retryResult.stdout || '';
           batchStderr = retryResult.stderr || '';
           batchSuccess = !batchStdout.includes('ERR_PNPM_');
@@ -195,7 +199,7 @@ export async function installPackages(
   for (const pkg of directPkgs) {
     const installCmd = applyBinOverride(buildSingleCmd(packageManager, `${pkg.name}@${pkg.targetVersion}`, isWorkspace), installBinOverride);
     try {
-      const result = await execAsync(installCmd, { cwd, timeout: NPM_INSTALL_TIMEOUT });
+      const result = await execAsync(installCmd, { cwd, timeout: NPM_INSTALL_TIMEOUT, env });
       const combinedOutput = (result.stdout || '') + (result.stderr || '');
       const output = `$ ${installCmd}\n${combinedOutput}`;
       // pnpm can exit 0 while printing ERR_PNPM_* — verify via node_modules
