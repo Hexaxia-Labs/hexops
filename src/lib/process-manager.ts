@@ -4,6 +4,7 @@ import { join } from 'path';
 import type { ProjectConfig, LogEntry } from './types';
 import { logger } from './logger';
 import { getProjectSettings } from './settings';
+import { loadProjectEnvFile } from './project-env';
 import { addNotification } from './notifications';
 import { checkPort } from './port-checker';
 
@@ -32,33 +33,6 @@ function ensureLogsDir() {
 
 function getLogFilePath(projectId: string): string {
   return join(LOGS_DIR, `${projectId}.log`);
-}
-
-// Read a project's .env.local (and .env) and return key-value pairs.
-// This is needed because Next.js 16 + Turbopack bakes env vars at compile
-// time — if DATABASE_URL isn't in the OS-level process.env when the Turbopack
-// worker starts, it inlines undefined before .env.local ever loads.
-function loadProjectEnvFile(projectPath: string): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const filename of ['.env', '.env.local']) {
-    const filePath = join(projectPath, filename);
-    if (!existsSync(filePath)) continue;
-    try {
-      const lines = readFileSync(filePath, 'utf-8').split('\n');
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith('#')) continue;
-        const eqIdx = trimmed.indexOf('=');
-        if (eqIdx === -1) continue;
-        const key = trimmed.slice(0, eqIdx).trim();
-        const value = trimmed.slice(eqIdx + 1).trim();
-        if (key) result[key] = value;
-      }
-    } catch {
-      // ignore unreadable files
-    }
-  }
-  return result;
 }
 
 function addLogEntry(projectId: string, type: 'stdout' | 'stderr', message: string) {
